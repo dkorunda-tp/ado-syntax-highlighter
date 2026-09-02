@@ -8,6 +8,18 @@ const languageSelect = document.getElementById('language-select');
 const addPatternBtn = document.getElementById('add-pattern-btn');
 const patternsList = document.getElementById('patterns-list');
 const themeSelect = document.getElementById('theme-select');
+const vueSyntaxCheckbox = document.getElementById('vue-syntax-highlighting');
+
+async function loadVueSyntaxPreference() {
+  const { vueSyntaxHighlighting = true } = await browser.storage.sync.get('vueSyntaxHighlighting');
+  vueSyntaxCheckbox.checked = vueSyntaxHighlighting;
+}
+
+vueSyntaxCheckbox.addEventListener('change', async () => {
+  await browser.storage.sync.set({
+    vueSyntaxHighlighting: vueSyntaxCheckbox.checked
+  });
+});
 
 async function loadThemePreference() {
   const { themePreference = 'auto' } = await browser.storage.sync.get('themePreference');
@@ -184,4 +196,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadCustomHosts();
   loadCustomPatterns();
   loadThemePreference();
+  loadVueSyntaxPreference();
 });

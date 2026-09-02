@@ -14,6 +14,7 @@ A browser extension that brings syntax highlighting to file diffs in Azure DevOp
 - **Cross-Browser Support:** Available for both Chrome and Firefox.
 - **Custom Domains Support**: Works with self-hosted (on-premise) and other custom Azure DevOps domains via a simple configuration page.
 - **Custom File Type Mapping:** Map specific file patterns (e.g., `*.myext`, `myfile.ext`) to a syntax highlighting language of your choice.
+- **Vue Single-File Components:** Optionally highlights each `<script>`, `<template>`, and `<style>` block with its own language in pull-request diffs and full-file views.
 
 ## Screenshots
 
@@ -92,6 +93,13 @@ You can override the default language detection by mapping specific file pattern
 5.  Click "Add Pattern".
 
 Custom patterns take priority over the default language detection.
+
+### Vue Single-File Components
+
+Vue-aware highlighting is enabled by default and can be turned off from the
+extension options. It detects JavaScript or TypeScript in `<script>` blocks,
+markup in `<template>` blocks, and CSS preprocessors supported by the bundled
+Prism build in `<style lang="...">` blocks.
 
 ## Contributing
 
