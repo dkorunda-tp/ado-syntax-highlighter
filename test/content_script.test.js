@@ -116,6 +116,44 @@ test('keeps side-by-side diff state independent', () => {
   assert.equal(languages.get(newMarkup), 'markup');
 });
 
+test('treats a markerless multiline Vue template viewport as markup', () => {
+  const context = loadContentScript();
+  const lines = [
+    line('<v-chip'),
+    line(':color="'),
+    line("matchRequest.stage === 'matched'"),
+    line("? 'success'"),
+    line(": 'warning'"),
+    line('>'),
+    line('{{ matchRequest.stage }}'),
+    line('</v-chip>')
+  ];
+  const languages = context.classifyVueColumn(lines);
+
+  assert.deepEqual(
+    lines.map(item => languages.get(item)),
+    Array(lines.length).fill('markup')
+  );
+});
+
+test('retains the Vue section on ambiguous recycled rows', () => {
+  const context = loadContentScript();
+  const lines = [
+    line("matchRequest.stage === 'matched'"),
+    line("? 'success'"),
+    line(": 'warning'")
+  ];
+  lines.forEach(item => {
+    item.dataset.adoSyntaxLanguage = 'markup';
+  });
+  const languages = context.classifyVueColumn(lines);
+
+  assert.deepEqual(
+    lines.map(item => languages.get(item)),
+    Array(lines.length).fill('markup')
+  );
+});
+
 test('gets the full-file name from the Azure DevOps path query', () => {
   const context = loadContentScript();
   context.window.location.href =

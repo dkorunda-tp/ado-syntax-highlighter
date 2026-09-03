@@ -151,7 +151,13 @@ function getVueBlockMarker(line) {
 
 function inferVueLanguage(line) {
   const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('<') || trimmed.includes('{{')) {
+  if (
+    !trimmed ||
+    trimmed.startsWith('<') ||
+    trimmed === '>' ||
+    trimmed.includes('{{') ||
+    /^(?:v-|[:@#])[^=\s]+\s*=/.test(trimmed)
+  ) {
     return 'markup';
   }
   if (
@@ -161,6 +167,64 @@ function inferVueLanguage(line) {
     return 'css';
   }
   return 'typescript';
+}
+
+function inferVueRegionLanguage(records) {
+  const votes = { markup: 0, css: 0, typescript: 0 };
+  const strongVotes = { markup: 0, css: 0, typescript: 0 };
+  const previousVotes = { markup: 0, css: 0, typescript: 0 };
+
+  for (const record of records) {
+    const trimmed = record.line.trim();
+    if (trimmed) {
+      const inferred = inferVueLanguage(record.line);
+      votes[inferred] += 1;
+
+      // These only occur inside an HTML start tag or Vue template body. Give
+      // them extra weight so multiline directive expressions stay markup.
+      if (
+        trimmed.startsWith('<') ||
+        trimmed === '>' ||
+        trimmed.includes('{{') ||
+        /^(?:v-|[:@#])[^=\s]+\s*=/.test(trimmed)
+      ) {
+        votes.markup += 2;
+        strongVotes.markup += 1;
+      } else if (
+        /^(?:[.#][\w-]+|@(?:media|supports|keyframes)|[a-z][\w-]*(?:\s|,|:|\.|#|\[)).*\{\s*$/i.test(trimmed) ||
+        /^[\w-]+\s*:\s*[^=].*;\s*$/.test(trimmed)
+      ) {
+        strongVotes.css += 1;
+      } else if (
+        /^(?:const|let|var|import|export|interface|type|function|class|async|await|return|if|for|while|try|catch|throw|new)\b/.test(trimmed)
+      ) {
+        strongVotes.typescript += 1;
+      }
+    }
+
+    const previousLanguage = record.element.dataset.adoSyntaxLanguage;
+    if (previousLanguage in previousVotes) {
+      previousVotes[previousLanguage] += 1;
+    }
+  }
+
+  const rankedVotes = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+  const [inferredLanguage, inferredScore] = rankedVotes[0];
+  const secondScore = rankedVotes[1][1];
+  const rankedStrongVotes = Object.entries(strongVotes).sort((a, b) => b[1] - a[1]);
+  const [strongLanguage, strongScore] = rankedStrongVotes[0];
+  const secondStrongScore = rankedStrongVotes[1][1];
+
+  // A decisive visible signature wins when a large scroll jumps across SFC
+  // sections. Otherwise retain the section attached to ADO's recycled rows.
+  if (strongScore > 0 && strongScore > secondStrongScore) {
+    return strongLanguage;
+  }
+
+  const [previousLanguage, previousScore] = Object.entries(previousVotes)
+    .sort((a, b) => b[1] - a[1])[0];
+  if (previousScore > 0) return previousLanguage;
+  return inferredScore > secondScore ? inferredLanguage : 'typescript';
 }
 
 function classifyVueColumn(lineElements) {
@@ -196,10 +260,28 @@ function classifyVueColumn(lineElements) {
     }
   }
 
-  return new Map(records.map(record => [
-    record.element,
-    record.forwardLanguage || record.backwardLanguage || inferVueLanguage(record.line)
-  ]));
+  const languages = new Map();
+  for (let index = 0; index < records.length;) {
+    const record = records[index];
+    const resolvedLanguage = record.forwardLanguage || record.backwardLanguage;
+    if (resolvedLanguage) {
+      languages.set(record.element, resolvedLanguage);
+      index += 1;
+      continue;
+    }
+
+    const unresolved = [];
+    while (index < records.length) {
+      const candidate = records[index];
+      if (candidate.forwardLanguage || candidate.backwardLanguage) break;
+      unresolved.push(candidate);
+      index += 1;
+    }
+    const regionLanguage = inferVueRegionLanguage(unresolved);
+    unresolved.forEach(candidate => languages.set(candidate.element, regionLanguage));
+  }
+
+  return languages;
 }
 
 function classifyVueLines(lineElements) {
