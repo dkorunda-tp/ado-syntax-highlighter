@@ -80,6 +80,21 @@
   <script src="../../../dist/chrome_build/options.js"></script>
   <script>
     setTimeout(() => {
+      // File-tree selection in ADO uses pushState rather than a hard reload.
+      history.pushState({}, '', '?path=/src/DedicatedExample.vue');
+    }, 250);
+
+    setTimeout(() => {
+      // Azure DevOps recycles visible line nodes while scrolling. Simulate the
+      // same behavior by replacing text inside existing nodes rather than
+      // adding a new diff.
+      document.querySelectorAll('.repos-line-content')[1].textContent =
+        'let recycledAnswer: number = 43';
+      document.querySelectorAll('.view-line')[1].textContent =
+        "let recycledLabel: string = 'Still highlighted'";
+    }, 850);
+
+    setTimeout(() => {
       const result = document.getElementById('result');
       const metrics = {
         highlighted: document.querySelectorAll('.ado-syntax-highlighted').length,
@@ -87,15 +102,17 @@
         markup: document.querySelectorAll('[data-ado-syntax-language="markup"]').length,
         typescript: document.querySelectorAll('[data-ado-syntax-language="typescript"]').length,
         css: document.querySelectorAll('[data-ado-syntax-language="css"]').length,
-        vueOption: document.querySelector('#language-select option[value="vue"]')?.textContent || null
+        vueOption: document.querySelector('#language-select option[value="vue"]')?.textContent || null,
+        recycledKeywords: [...document.querySelectorAll('.ado-syntax-highlighted .token.keyword')]
+          .filter(element => element.textContent === 'let').length
       };
       const passed = metrics.highlighted === 12 && metrics.keywords >= 2 &&
         metrics.markup >= 7 && metrics.typescript >= 2 && metrics.css >= 1 &&
-        metrics.vueOption === 'vue (Vue SFC-aware)';
+        metrics.vueOption === 'vue (Vue SFC-aware)' && metrics.recycledKeywords === 2;
       result.className = passed ? 'pass' : 'fail';
       result.textContent = `${passed ? 'PASS' : 'FAIL'} ${JSON.stringify(metrics)}`;
       document.title = passed ? 'PASS — ADO Vue renderer' : 'FAIL — ADO Vue renderer';
-    }, 800);
+    }, 1750);
   </script>
 </body>
 </html>

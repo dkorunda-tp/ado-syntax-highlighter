@@ -33,7 +33,8 @@ function loadContentScript() {
       getComputedStyle: () => ({ color: 'rgb(0, 0, 0)' })
     },
     setTimeout,
-    clearTimeout
+    clearTimeout,
+    setInterval() {}
   };
   vm.createContext(context);
   vm.runInContext(source, context);

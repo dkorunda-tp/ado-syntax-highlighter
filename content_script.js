@@ -14,6 +14,7 @@ let customFilePatterns = {};
 let themePreference = 'auto';
 let vueSyntaxHighlighting = true;
 let lastAppliedUrl = '';
+let lastObservedUrl = window.location.href;
 
 // Load custom patterns and theme preference from storage
 async function loadSettings() {
@@ -104,9 +105,14 @@ const nonCodeQuery = '.screen-reader-only, span[aria-hidden="true"]';
 const adoLineSelector = '.repos-line-content';
 const monacoLineSelector = '.monaco-editor .view-lines > .view-line';
 const codeLineSelector = `${adoLineSelector}, ${monacoLineSelector}`;
+const virtualizedOriginalContent = new WeakMap();
 
 function isMonacoLine(lineElement) {
   return lineElement.classList.contains('view-line');
+}
+
+function isVirtualizedLine(lineElement) {
+  return isMonacoLine(lineElement) || !lineElement.closest('.repos-summary-header');
 }
 
 function getCodeText(lineElement) {
@@ -201,7 +207,7 @@ function classifyVueLines(lineElements) {
   for (const element of lineElements) {
     // Side-by-side diffs interleave the old and new file in DOM order. Grouping
     // by horizontal position keeps each Vue block state independent.
-    const visibleElement = element.dataset.adoSyntaxProcessed === 'true'
+    const visibleElement = element.dataset.adoSyntaxProcessed === 'true' && !isVirtualizedLine(element)
       ? element.nextElementSibling || element
       : element;
     const column = Math.round(visibleElement.getBoundingClientRect().left / 20) * 20;
@@ -220,13 +226,23 @@ function classifyVueLines(lineElements) {
 }
 
 function highlightLine(originalLineElement, language) {
-  if (
+  if (!language || !Prism.languages[language]) {
+    return;
+  }
+
+  const codeText = getCodeText(originalLineElement);
+  const virtualized = isVirtualizedLine(originalLineElement);
+  if (virtualized) {
+    if (
+      originalLineElement.dataset.adoSyntaxProcessed === 'true' &&
+      originalLineElement.dataset.adoSyntaxSource === codeText
+    ) {
+      return;
+    }
+  } else if (
     originalLineElement.classList.contains('ado-syntax-highlighted') ||
     originalLineElement.dataset.adoSyntaxProcessed === 'true'
   ) {
-    return;
-  }
-  if (!language || !Prism.languages[language]) {
     return;
   }
 
@@ -240,14 +256,26 @@ function highlightLine(originalLineElement, language) {
   const highlightedLine = originalLineElement.cloneNode(true);
   const code = document.createElement('code');
   code.className = `language-${language}`;
-  code.textContent = getCodeText(originalLineElement);
+  code.textContent = codeText;
 
   Prism.highlightElement(code, false, () => {
     const contentElement = document.createElement(
-      isMonacoLine(originalLineElement) ? 'span' : 'div'
+      virtualized ? 'span' : 'div'
     );
     contentElement.innerHTML = code.innerHTML;
     contentElement.classList.add(getTheme(originalLineElement));
+
+    if (virtualized) {
+      virtualizedOriginalContent.set(originalLineElement, originalLineElement.innerHTML);
+      originalLineElement.innerHTML = '';
+      originalLineElement.appendChild(contentElement);
+      originalLineElement.classList.add('ado-syntax-highlighted');
+      originalLineElement.dataset.adoSyntaxProcessed = 'true';
+      originalLineElement.dataset.adoSyntaxSource = codeText;
+      originalLineElement.dataset.adoSyntaxLanguage = language;
+      return;
+    }
+
     highlightedLine.innerHTML = '';
 
     elementsToPreserve.forEach(el => {
@@ -275,7 +303,7 @@ function highlightLine(originalLineElement, language) {
 
 function processLines(lineElements, fileName) {
   const originals = Array.from(lineElements).filter(
-    element => !element.classList.contains('ado-syntax-highlighted')
+    element => !element.classList.contains('ado-syntax-highlighted') || isVirtualizedLine(element)
   );
   if (originals.length === 0) return;
 
@@ -352,10 +380,23 @@ function processFullFileView() {
 
 function resetHighlighting() {
   document.querySelectorAll('.ado-syntax-highlighted').forEach(highlightedLine => {
+    if (isVirtualizedLine(highlightedLine)) {
+      const originalContent = virtualizedOriginalContent.get(highlightedLine);
+      if (originalContent !== undefined) {
+        highlightedLine.innerHTML = originalContent;
+      }
+      highlightedLine.classList.remove('ado-syntax-highlighted');
+      delete highlightedLine.dataset.adoSyntaxProcessed;
+      delete highlightedLine.dataset.adoSyntaxSource;
+      delete highlightedLine.dataset.adoSyntaxLanguage;
+      return;
+    }
+
     const originalLine = highlightedLine.previousElementSibling;
     if (originalLine?.dataset.adoSyntaxProcessed === 'true') {
       originalLine.style.display = '';
       originalLine.style.visibility = '';
+      delete originalLine.dataset.adoSyntaxSource;
     }
     highlightedLine.remove();
   });
@@ -363,6 +404,7 @@ function resetHighlighting() {
     originalLine.style.display = '';
     originalLine.style.visibility = '';
     delete originalLine.dataset.adoSyntaxProcessed;
+    delete originalLine.dataset.adoSyntaxSource;
   });
 }
 
@@ -409,9 +451,23 @@ const debouncedApplyHighlighting = debounce(applySyntaxHighlighting, 250);
 // Listen for URL changes
 window.addEventListener('popstate', debouncedApplyHighlighting);
 
+// Azure DevOps uses pushState for file selection, which does not emit a
+// popstate event. Polling only the URL is cheap and also covers renderer
+// transitions that reuse the existing line nodes without a matching mutation.
+setInterval(() => {
+  if (lastObservedUrl !== window.location.href) {
+    lastObservedUrl = window.location.href;
+    debouncedApplyHighlighting();
+  }
+}, 250);
+
 // Observe DOM changes for dynamically loaded content
 new MutationObserver((mutationsList) => {
   for (const mutation of mutationsList) {
+    if (mutation.target.parentElement?.closest('.monaco-editor, .vc-diff-viewer, .diff-frame')) {
+      debouncedApplyHighlighting();
+      return;
+    }
     if (!(mutation.type === 'childList' && mutation.addedNodes.length > 0)) {
       continue;
     }
@@ -420,15 +476,15 @@ new MutationObserver((mutationsList) => {
         continue;
       }
       if (
-        node.matches?.('.repos-summary-code-diff, .vc-diff-viewer, .diff-frame, .repos-diff-contents-row, .bolt-card, .repos-pr-iteration-file-header') ||
-        node.querySelector?.('.repos-summary-code-diff, .vc-diff-viewer, .diff-frame, .repos-diff-contents-row, .bolt-card, .repos-pr-iteration-file-header')
+        node.matches?.('.repos-summary-code-diff, .vc-diff-viewer, .diff-frame, .repos-diff-contents-row, .bolt-card, .repos-pr-iteration-file-header, .repos-line-content, .view-line') ||
+        node.querySelector?.('.repos-summary-code-diff, .vc-diff-viewer, .diff-frame, .repos-diff-contents-row, .bolt-card, .repos-pr-iteration-file-header, .repos-line-content, .view-line')
       ) {
         debouncedApplyHighlighting();
         return;
       }
     }
   }
-}).observe(document.body, { childList: true, subtree: true });
+}).observe(document.body, { childList: true, characterData: true, subtree: true });
 
 browser.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'sync') return;
