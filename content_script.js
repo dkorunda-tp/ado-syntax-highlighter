@@ -99,8 +99,18 @@ function getTheme(element) {
 }
 
 const nonCodeQuery = '.screen-reader-only, span[aria-hidden="true"]';
+const adoLineSelector = '.monospaced-text > .repos-line-content';
+const monacoLineSelector = '.monaco-editor .view-lines > .view-line';
+const codeLineSelector = `${adoLineSelector}, ${monacoLineSelector}`;
+
+function isMonacoLine(lineElement) {
+  return lineElement.classList.contains('view-line');
+}
 
 function getCodeText(lineElement) {
+  if (isMonacoLine(lineElement)) {
+    return lineElement.textContent || '';
+  }
   const codeContainer = lineElement.cloneNode(true);
   codeContainer.querySelectorAll(nonCodeQuery).forEach(el => el.remove());
   return codeContainer.textContent || '';
@@ -219,9 +229,11 @@ function highlightLine(originalLineElement, language) {
   }
 
   const elementsToPreserve = [];
-  originalLineElement.querySelectorAll(nonCodeQuery).forEach(el => {
-    elementsToPreserve.push(el.cloneNode(true));
-  });
+  if (!isMonacoLine(originalLineElement)) {
+    originalLineElement.querySelectorAll(nonCodeQuery).forEach(el => {
+      elementsToPreserve.push(el.cloneNode(true));
+    });
+  }
 
   const highlightedLine = originalLineElement.cloneNode(true);
   const code = document.createElement('code');
@@ -229,23 +241,32 @@ function highlightLine(originalLineElement, language) {
   code.textContent = getCodeText(originalLineElement);
 
   Prism.highlightElement(code, false, () => {
-    const contentDiv = document.createElement('div');
-    contentDiv.innerHTML = code.innerHTML;
-    contentDiv.classList.add(getTheme(originalLineElement));
+    const contentElement = document.createElement(
+      isMonacoLine(originalLineElement) ? 'span' : 'div'
+    );
+    contentElement.innerHTML = code.innerHTML;
+    contentElement.classList.add(getTheme(originalLineElement));
     highlightedLine.innerHTML = '';
 
     elementsToPreserve.forEach(el => {
       highlightedLine.appendChild(el);
     });
 
-    highlightedLine.appendChild(contentDiv);
+    highlightedLine.appendChild(contentElement);
     highlightedLine.classList.add('ado-syntax-highlighted');
     highlightedLine.dataset.adoSyntaxLanguage = language;
 
     // Keeping the original line in the DOM preserves Azure DevOps' line
     // comment behavior, which is bound to that element.
     originalLineElement.dataset.adoSyntaxProcessed = 'true';
-    originalLineElement.style.display = 'none';
+    if (isMonacoLine(originalLineElement)) {
+      // Monaco owns and reuses its line nodes. Keep the source node in place
+      // and overlay the highlighted clone so scrolling and hit testing remain
+      // stable.
+      originalLineElement.style.visibility = 'hidden';
+    } else {
+      originalLineElement.style.display = 'none';
+    }
     originalLineElement.parentNode.insertBefore(highlightedLine, originalLineElement.nextSibling);
   });
 }
@@ -271,40 +292,74 @@ function processFileDiff(fileDiffElement) {
     '.repos-change-summary-file-icon-container + .flex-column .text-ellipsis'
   );
 
-  const fileName = fileNameElement ? fileNameElement.textContent.trim() : null;
-  const lineElements = fileDiffElement.querySelectorAll(
-    '.monospaced-text > .repos-line-content'
-  );
+  const fileName = fileNameElement
+    ? fileNameElement.textContent.trim()
+    : getFileNameFromElement(fileDiffElement) || getFileNameFromLocation();
+  const lineElements = fileDiffElement.querySelectorAll(codeLineSelector);
   processLines(lineElements, fileName);
+}
+
+function extractFileName(value) {
+  if (!value) return null;
+  const match = value.match(/([^/\\\s]+\.[a-z][a-z0-9]{0,9})(?=\s|$|[?#])/i);
+  return match?.[1] || null;
+}
+
+function getFileNameFromElement(element) {
+  const selectors = [
+    '[data-automation-key="file-name"]',
+    '.repos-change-summary-file-name',
+    '.repos-pr-iteration-file-header .text-ellipsis',
+    '.bolt-header-title',
+    '.text-ellipsis',
+    '[title]',
+    '[aria-label]'
+  ];
+
+  for (const selector of selectors) {
+    for (const candidate of element.querySelectorAll(selector)) {
+      const values = [
+        candidate.textContent,
+        candidate.getAttribute('title'),
+        candidate.getAttribute('aria-label')
+      ];
+      for (const value of values) {
+        const fileName = extractFileName(value);
+        if (fileName) return fileName;
+      }
+    }
+  }
+  return extractFileName(element.textContent);
 }
 
 function getFileNameFromLocation() {
   const url = new URL(window.location.href);
   const filePath = url.searchParams.get('path') || url.searchParams.get('itemPath');
   if (!filePath) return null;
-  return filePath.split('/').filter(Boolean).pop() || null;
+  const lastSegment = filePath.split('/').filter(Boolean).pop() || null;
+  return extractFileName(lastSegment);
 }
 
-function processFullFileView(processedDiffLines) {
-  const fileName = getFileNameFromLocation();
+function processFullFileView() {
+  const fileName = getFileNameFromLocation() || getFileNameFromElement(document);
   if (!fileName) return;
 
-  const lineElements = Array.from(document.querySelectorAll(
-    '.monospaced-text > .repos-line-content'
-  )).filter(element => !processedDiffLines.has(element));
+  const lineElements = document.querySelectorAll(codeLineSelector);
   processLines(lineElements, fileName);
 }
 
 function resetHighlighting() {
   document.querySelectorAll('.ado-syntax-highlighted').forEach(highlightedLine => {
     const originalLine = highlightedLine.previousElementSibling;
-    if (originalLine?.classList.contains('repos-line-content')) {
+    if (originalLine?.dataset.adoSyntaxProcessed === 'true') {
       originalLine.style.display = '';
+      originalLine.style.visibility = '';
     }
     highlightedLine.remove();
   });
   document.querySelectorAll('[data-ado-syntax-processed="true"]').forEach(originalLine => {
     originalLine.style.display = '';
+    originalLine.style.visibility = '';
     delete originalLine.dataset.adoSyntaxProcessed;
   });
 }
@@ -323,13 +378,10 @@ function applySyntaxHighlighting() {
   }
 
   const fileDiffPanels = document.querySelectorAll('.repos-summary-header');
-  const processedDiffLines = new Set();
   fileDiffPanels.forEach(fileDiffPanel => {
-    fileDiffPanel.querySelectorAll('.monospaced-text > .repos-line-content')
-      .forEach(element => processedDiffLines.add(element));
     processFileDiff(fileDiffPanel);
   });
-  processFullFileView(processedDiffLines);
+  processFullFileView();
 }
 
 console.debug("ADO Syntax Highlighter: Content script loaded.");

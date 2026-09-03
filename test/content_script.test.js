@@ -44,6 +44,7 @@ function line(text, left = 100) {
   return {
     textContent: text,
     dataset: {},
+    classList: { contains: () => false },
     cloneNode() {
       return {
         textContent: text,
@@ -119,4 +120,14 @@ test('gets the full-file name from the Azure DevOps path query', () => {
   context.window.location.href =
     'https://example.visualstudio.com/project/_git/repo?path=/src/views/Queue.vue';
   assert.equal(context.getFileNameFromLocation(), 'Queue.vue');
+});
+
+test('extracts the file name from a dedicated diff header', () => {
+  const context = loadContentScript();
+  assert.equal(
+    context.extractFileName('ExpandedAdClickDetails.vue  -11 +2'),
+    'ExpandedAdClickDetails.vue'
+  );
+  assert.equal(context.extractFileName('/src/a/file.ts?version=1'), 'file.ts');
+  assert.equal(context.extractFileName('/src/components'), null);
 });
