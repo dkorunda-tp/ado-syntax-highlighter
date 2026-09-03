@@ -33,15 +33,17 @@ themeSelect.addEventListener('change', async () => {
 
 function populateLanguageDropdown() {
   // Get all available Prism languages (filter out helper methods)
-  const languages = Object.keys(Prism.languages)
-    .filter(lang => typeof Prism.languages[lang] !== 'function')
-    .sort();
+  const languages = [...new Set([
+    ...Object.keys(Prism.languages)
+      .filter(lang => typeof Prism.languages[lang] !== 'function'),
+    'vue'
+  ])].sort();
 
   // Populate the dropdown
   languages.forEach(lang => {
     const option = document.createElement('option');
     option.value = lang;
-    option.textContent = lang;
+    option.textContent = lang === 'vue' ? 'vue (Vue SFC-aware)' : lang;
     languageSelect.appendChild(option);
   });
 }

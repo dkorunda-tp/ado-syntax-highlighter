@@ -99,7 +99,9 @@ function getTheme(element) {
 }
 
 const nonCodeQuery = '.screen-reader-only, span[aria-hidden="true"]';
-const adoLineSelector = '.monospaced-text > .repos-line-content';
+// The summary renderer places the content directly under `.monospaced-text`,
+// while the dedicated file renderer adds intermediate row wrappers.
+const adoLineSelector = '.repos-line-content';
 const monacoLineSelector = '.monaco-editor .view-lines > .view-line';
 const codeLineSelector = `${adoLineSelector}, ${monacoLineSelector}`;
 
@@ -277,13 +279,13 @@ function processLines(lineElements, fileName) {
   );
   if (originals.length === 0) return;
 
-  if (vueSyntaxHighlighting && isVueFile(fileName)) {
+  const language = getLanguageFromFileName(fileName);
+  if (language === 'vue' || (vueSyntaxHighlighting && isVueFile(fileName))) {
     const vueLanguages = classifyVueLines(originals);
     originals.forEach(element => highlightLine(element, vueLanguages.get(element)));
     return;
   }
 
-  const language = getLanguageFromFileName(fileName);
   originals.forEach(element => highlightLine(element, language));
 }
 

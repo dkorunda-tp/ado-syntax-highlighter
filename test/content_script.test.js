@@ -131,3 +131,12 @@ test('extracts the file name from a dedicated diff header', () => {
   assert.equal(context.extractFileName('/src/a/file.ts?version=1'), 'file.ts');
   assert.equal(context.extractFileName('/src/components'), null);
 });
+
+test('uses an explicit vue custom mapping even when automatic Vue support is off', () => {
+  const context = loadContentScript();
+  vm.runInContext(`
+    customFilePatterns = { '*.component': 'vue' };
+    vueSyntaxHighlighting = false;
+  `, context);
+  assert.equal(context.getLanguageFromFileName('Example.component'), 'vue');
+});

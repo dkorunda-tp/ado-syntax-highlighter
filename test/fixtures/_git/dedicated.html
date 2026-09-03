@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ADO dedicated Vue renderer test</title>
+  <link rel="stylesheet" href="../../../dist/chrome_build/prism/prism.css">
+  <link rel="stylesheet" href="../../../dist/chrome_build/custom_styles.css">
+  <style>
+    body { font: 14px system-ui; margin: 24px; }
+    #result { padding: 12px; margin-bottom: 18px; border: 2px solid #888; }
+    #result.pass { border-color: #16833b; background: #e8f7ed; }
+    #result.fail { border-color: #c42b1c; background: #fde7e5; }
+    .diff-frame { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .pane { border: 1px solid #ccc; padding: 12px; }
+    .repos-line-content, .view-line { display: block; white-space: pre; font-family: monospace; min-height: 20px; }
+    .monaco-editor .view-lines { position: relative; height: 180px; }
+    .monaco-editor .view-line { position: absolute; left: 0; right: 0; }
+  </style>
+</head>
+<body>
+  <h1>Dedicated Vue diff renderer</h1>
+  <div id="result">Waiting for the built extension…</div>
+  <div class="bolt-header-title">DedicatedExample.vue -1 +1</div>
+  <div class="diff-frame">
+    <section class="pane">
+      <h2>ADO nested-line renderer</h2>
+      <div class="monospaced-text">
+        <div><span class="repos-line-content">&lt;script setup lang="ts"&gt;</span></div>
+        <div><span class="repos-line-content">const answer: number = 42</span></div>
+        <div><span class="repos-line-content">&lt;/script&gt;</span></div>
+        <div><span class="repos-line-content">&lt;template&gt;</span></div>
+        <div><span class="repos-line-content">  &lt;strong&gt;{{ answer }}&lt;/strong&gt;</span></div>
+        <div><span class="repos-line-content">&lt;/template&gt;</span></div>
+      </div>
+    </section>
+    <section class="pane monaco-editor">
+      <h2>Monaco renderer</h2>
+      <div class="view-lines">
+        <div class="view-line" style="top: 0">&lt;script setup lang="ts"&gt;</div>
+        <div class="view-line" style="top: 20px">const label: string = 'Vue'</div>
+        <div class="view-line" style="top: 40px">&lt;/script&gt;</div>
+        <div class="view-line" style="top: 60px">&lt;style scoped&gt;</div>
+        <div class="view-line" style="top: 80px">strong { color: red; }</div>
+        <div class="view-line" style="top: 100px">&lt;/style&gt;</div>
+      </div>
+    </section>
+  </div>
+
+  <h2>Custom mapping option</h2>
+  <select id="language-select"><option value="">Select a language…</option></select>
+  <div id="options-fixture" hidden>
+    <input id="host-input"><button id="add-host-btn"></button>
+    <ul id="hosts-list"></ul><ul id="default-hosts-list"></ul>
+    <input id="pattern-input"><button id="add-pattern-btn"></button>
+    <ul id="patterns-list"></ul>
+    <select id="theme-select"><option value="auto">auto</option></select>
+    <input type="checkbox" id="vue-syntax-highlighting">
+  </div>
+
+  <script>
+    window.browser = {
+      storage: {
+        sync: {
+          get: async () => ({ vueSyntaxHighlighting: true }),
+          set: async () => {}
+        },
+        onChanged: { addListener() {} }
+      },
+      runtime: {
+        getManifest: () => ({ host_permissions: [] })
+      },
+      permissions: {
+        request: async () => false,
+        remove: async () => false
+      }
+    };
+  </script>
+  <script src="../../../dist/chrome_build/prism/prism.min.js"></script>
+  <script src="../../../dist/chrome_build/content_script.js"></script>
+  <script src="../../../dist/chrome_build/options.js"></script>
+  <script>
+    setTimeout(() => {
+      const result = document.getElementById('result');
+      const metrics = {
+        highlighted: document.querySelectorAll('.ado-syntax-highlighted').length,
+        keywords: document.querySelectorAll('.ado-syntax-highlighted .token.keyword').length,
+        markup: document.querySelectorAll('[data-ado-syntax-language="markup"]').length,
+        typescript: document.querySelectorAll('[data-ado-syntax-language="typescript"]').length,
+        css: document.querySelectorAll('[data-ado-syntax-language="css"]').length,
+        vueOption: document.querySelector('#language-select option[value="vue"]')?.textContent || null
+      };
+      const passed = metrics.highlighted === 12 && metrics.keywords >= 2 &&
+        metrics.markup >= 7 && metrics.typescript >= 2 && metrics.css >= 1 &&
+        metrics.vueOption === 'vue (Vue SFC-aware)';
+      result.className = passed ? 'pass' : 'fail';
+      result.textContent = `${passed ? 'PASS' : 'FAIL'} ${JSON.stringify(metrics)}`;
+      document.title = passed ? 'PASS — ADO Vue renderer' : 'FAIL — ADO Vue renderer';
+    }, 800);
+  </script>
+</body>
+</html>
