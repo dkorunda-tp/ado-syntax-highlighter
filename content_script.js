@@ -107,6 +107,12 @@ const monacoLineSelector = '.monaco-editor .view-lines > .view-line';
 const codeLineSelector = `${adoLineSelector}, ${monacoLineSelector}`;
 const virtualizedOriginalContent = new WeakMap();
 
+function normalizeVisibleWhitespace(text) {
+  // ADO's virtualized renderer can place its visible whitespace glyphs in the
+  // line text. They are presentation only and should not reach Prism/output.
+  return text.replaceAll('\u00b7', ' ').replaceAll('\u2192', '\t');
+}
+
 function isMonacoLine(lineElement) {
   return lineElement.classList.contains('view-line');
 }
@@ -117,11 +123,11 @@ function isVirtualizedLine(lineElement) {
 
 function getCodeText(lineElement) {
   if (isMonacoLine(lineElement)) {
-    return lineElement.textContent || '';
+    return normalizeVisibleWhitespace(lineElement.textContent || '');
   }
   const codeContainer = lineElement.cloneNode(true);
   codeContainer.querySelectorAll(nonCodeQuery).forEach(el => el.remove());
-  return codeContainer.textContent || '';
+  return normalizeVisibleWhitespace(codeContainer.textContent || '');
 }
 
 function getVueBlockMarker(line) {
@@ -547,7 +553,9 @@ setInterval(() => {
 new MutationObserver((mutationsList) => {
   for (const mutation of mutationsList) {
     if (mutation.target.parentElement?.closest('.monaco-editor, .vc-diff-viewer, .diff-frame')) {
-      debouncedApplyHighlighting();
+      // MutationObserver callbacks run before paint. Applying synchronously
+      // prevents a recycled raw ADO row from flashing for one debounce cycle.
+      applySyntaxHighlighting();
       return;
     }
     if (!(mutation.type === 'childList' && mutation.addedNodes.length > 0)) {
@@ -561,7 +569,7 @@ new MutationObserver((mutationsList) => {
         node.matches?.('.repos-summary-code-diff, .vc-diff-viewer, .diff-frame, .repos-diff-contents-row, .bolt-card, .repos-pr-iteration-file-header, .repos-line-content, .view-line') ||
         node.querySelector?.('.repos-summary-code-diff, .vc-diff-viewer, .diff-frame, .repos-diff-contents-row, .bolt-card, .repos-pr-iteration-file-header, .repos-line-content, .view-line')
       ) {
-        debouncedApplyHighlighting();
+        applySyntaxHighlighting();
         return;
       }
     }

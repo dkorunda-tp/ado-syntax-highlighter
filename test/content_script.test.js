@@ -64,6 +64,14 @@ test('reads Vue block language attributes and aliases', () => {
   assert.equal(context.getVueBlockMarker('<template>').language, 'markup');
 });
 
+test('normalizes Azure visible whitespace markers before highlighting', () => {
+  const context = loadContentScript();
+  assert.equal(
+    context.normalizeVisibleWhitespace('··const·answer→=·42'),
+    '  const answer\t= 42'
+  );
+});
+
 test('classifies a truncated hunk before a closing script tag', () => {
   const context = loadContentScript();
   const lines = [

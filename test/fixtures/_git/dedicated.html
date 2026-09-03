@@ -102,9 +102,9 @@
       // same behavior by replacing text inside existing nodes rather than
       // adding a new diff.
       document.querySelectorAll('.repos-line-content')[1].textContent =
-        'let recycledAnswer: number = 43';
+        'let·recycledAnswer:·number·=·43';
       document.querySelectorAll('.view-line')[1].textContent =
-        "let recycledLabel: string = 'Still highlighted'";
+        "let·recycledLabel:·string·=·'Still highlighted'";
 
       // Once the markerless viewport is known to be a template, recycle every
       // row to ambiguous expression continuations. They must retain HTML mode.
@@ -112,6 +112,13 @@
         .forEach((line, index) => {
           line.textContent = `matchRequest.stage === templateState${index}`;
         });
+
+      requestAnimationFrame(() => {
+        const recycledKeywords = [...document.querySelectorAll(
+          '.ado-syntax-highlighted .token.keyword'
+        )].filter(element => element.textContent === 'let').length;
+        window.highlightedBeforePaint = recycledKeywords === 2;
+      });
     }, 850);
 
     setTimeout(() => {
@@ -127,12 +134,16 @@
           .filter(element => element.textContent === 'let').length,
         virtualizedTemplateLines: document.querySelectorAll(
           '#markerless-template [data-ado-syntax-language="markup"]'
-        ).length
+        ).length,
+        whitespaceMarkers: [...document.querySelectorAll('.ado-syntax-highlighted')]
+          .filter(element => element.textContent.includes('·')).length,
+        highlightedBeforePaint: window.highlightedBeforePaint === true
       };
       const passed = metrics.highlighted === 20 && metrics.keywords >= 2 &&
         metrics.markup >= 17 && metrics.typescript >= 2 && metrics.css >= 1 &&
         metrics.vueOption === 'vue (Vue SFC-aware)' && metrics.recycledKeywords === 2 &&
-        metrics.virtualizedTemplateLines === 8;
+        metrics.virtualizedTemplateLines === 8 && metrics.whitespaceMarkers === 0 &&
+        metrics.highlightedBeforePaint;
       result.className = passed ? 'pass' : 'fail';
       result.textContent = `${passed ? 'PASS' : 'FAIL'} ${JSON.stringify(metrics)}`;
       document.title = passed ? 'PASS — ADO Vue renderer' : 'FAIL — ADO Vue renderer';
