@@ -1,0 +1,179 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const { JSDOM, VirtualConsole } = require('jsdom');
+
+const root = path.join(__dirname, '..');
+const prismSource = fs.readFileSync(path.join(root, 'prism', 'prism.js'), 'utf8');
+const contentScriptSource = fs.readFileSync(path.join(root, 'content_script.js'), 'utf8');
+
+const PR_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=files';
+
+// Loads Prism and the content script into a jsdom window. The MutationObserver is stubbed
+// so that tests call processFileDiff themselves and control the timing.
+async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {} } = {}) {
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url,
+    runScripts: 'outside-only',
+    virtualConsole
+  });
+  const { window } = dom;
+  window.MutationObserver = class {
+    observe() {}
+    disconnect() {}
+  };
+  window.browser = {
+    storage: { sync: { get: async () => ({ themePreference: 'prism-one-light', customFilePatterns }) } }
+  };
+  window.fetch = fetch || (() => Promise.reject(new Error('unexpected fetch')));
+  window.eval(prismSource);
+  window.eval(contentScriptSource);
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+
+  const highlightCalls = [];
+  const originalHighlight = window.Prism.highlightElement;
+  window.Prism.highlightElement = function (element, async, callback) {
+    highlightCalls.push({
+      language: element.className.replace(/^language-/, ''),
+      text: element.textContent
+    });
+    return originalHighlight.call(this, element, async, callback);
+  };
+
+  return { dom, window, highlightCalls };
+}
+
+function mount(window, html) {
+  const container = window.document.createElement('div');
+  container.innerHTML = html;
+  window.document.body.appendChild(container);
+  return container.querySelector('.repos-summary-header');
+}
+
+function escapeHtml(text) {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+function lineNumber(line) {
+  if (line == null) {
+    return '<div class="repos-line-number"></div>';
+  }
+  return `<div class="repos-line-number" data-line="${line}"><span class="screen-reader-only">Line ${line}</span>${line}</div>`;
+}
+
+function lineContent(type, code) {
+  const label = { added: 'Added', removed: 'Removed', unchanged: 'Unchanged' }[type];
+  return `<div class="repos-line-content ${type}"><span class="screen-reader-only">${label} line</span>${escapeHtml(code)}</div>`;
+}
+
+// Inline view: two number columns per row, old line first and new line second.
+function inlineRow({ oldLine = null, newLine = null, type, code }) {
+  return `<div class="repos-diff-contents-row monospaced-text">` +
+    `<div class="flex-row secondary-text">${lineNumber(oldLine)}${lineNumber(newLine)}</div>` +
+    `${lineContent(type, code)}</div>`;
+}
+
+// Side-by-side view: one number column per row.
+function paneRow({ line = null, type, code }) {
+  return `<div class="repos-diff-contents-row monospaced-text">` +
+    `<div class="flex-row secondary-text">${lineNumber(line)}</div>` +
+    `${lineContent(type, code)}</div>`;
+}
+
+function sideBySide({ oldRows, newRows }) {
+  return `<div class="vss-Splitter--container">` +
+    `<div class="vss-Splitter--pane-fixed">${oldRows.map(paneRow).join('')}</div>` +
+    `<div class="vss-Splitter--divider"></div>` +
+    `<div class="vss-Splitter--pane-flexible">${newRows.map(paneRow).join('')}</div>` +
+    `</div>`;
+}
+
+function fileCard({ filePath, diff }) {
+  const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+  return `<div class="repos-summary-header">` +
+    `<div class="flex-row">` +
+    `<div class="repos-change-summary-file-icon-container"><span class="fabric-icon"></span></div>` +
+    `<div class="flex-column">` +
+    `<div class="text-ellipsis">${fileName}</div>` +
+    `<div class="body-s secondary-text text-ellipsis">${filePath}</div>` +
+    `</div></div>` +
+    `<div class="repos-summary-code-diff">${diff}</div>` +
+    `</div>`;
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function response({ status = 200, contentType, body }) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: name => (name.toLowerCase() === 'content-type' ? contentType : null) },
+    json: async () => JSON.parse(body),
+    text: async () => body
+  };
+}
+
+function jsonResponse(data, status = 200) {
+  return response({ status, contentType: 'application/json; charset=utf-8', body: JSON.stringify(data) });
+}
+
+function textResponse(text, status = 200) {
+  return response({ status, contentType: 'text/plain; charset=utf-8', body: text });
+}
+
+function iteration(id, source, common) {
+  return {
+    id,
+    sourceRefCommit: { commitId: source },
+    targetRefCommit: { commitId: `target${id}` },
+    commonRefCommit: { commitId: common }
+  };
+}
+
+// A fake ADO server. `files` maps "commit:path" to file text; a missing entry is a 404.
+function createAdoServer({ iterations, files = {}, iterationsStatus = 200 }) {
+  const calls = [];
+  const fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    calls.push({ url: parsed, options });
+    if (parsed.pathname.endsWith('/iterations')) {
+      return iterationsStatus === 200
+        ? jsonResponse({ count: iterations.length, value: iterations })
+        : jsonResponse({ message: 'error' }, iterationsStatus);
+    }
+    if (parsed.pathname.endsWith('/items')) {
+      const key = `${parsed.searchParams.get('versionDescriptor.version')}:${parsed.searchParams.get('path')}`;
+      return key in files ? textResponse(files[key]) : jsonResponse({ message: 'not found' }, 404);
+    }
+    return jsonResponse({ message: 'unknown' }, 404);
+  };
+  return { fetch, calls };
+}
+
+function highlightedClones(fileDiffElement) {
+  return [...fileDiffElement.querySelectorAll('.repos-line-content.ado-syntax-highlighted')];
+}
+
+module.exports = {
+  PR_URL,
+  loadExtension,
+  mount,
+  inlineRow,
+  paneRow,
+  sideBySide,
+  fileCard,
+  deferred,
+  jsonResponse,
+  textResponse,
+  iteration,
+  createAdoServer,
+  highlightedClones
+};

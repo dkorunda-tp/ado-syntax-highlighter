@@ -2,6 +2,9 @@
   "name": "ado-syntax-highlighter",
   "version": "0.0.0",
   "main": "content_script.js",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ckob/ado-syntax-highlighter.git"
@@ -14,6 +17,7 @@
   },
   "homepage": "https://github.com/ckob/ado-syntax-highlighter",
   "devDependencies": {
+    "jsdom": "^30.1.1",
     "terser": "^5.44.1"
   }
 }
