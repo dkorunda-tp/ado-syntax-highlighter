@@ -47,6 +47,25 @@ test('nested template tags close the block only at depth zero', () => {
   ]);
 });
 
+test('template tags inside HTML comments do not change the template depth', () => {
+  assert.deepEqual(sections([
+    '<template>',
+    '  <!-- <template v-if="old"> -->',
+    '  <div />',
+    '  <!--',
+    '    <template #footer>',
+    '  -->',
+    '  <!-- </template> --><p />',
+    '</template>',
+    '<script setup lang="ts">',
+    'const a = 1',
+    '</script>'
+  ]), [
+    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'markup', 'typescript', 'markup'
+  ]);
+});
+
 test('a column-0 script tag inside a template does not open a block', () => {
   assert.deepEqual(sections([
     '<template>',

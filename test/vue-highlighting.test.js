@@ -233,11 +233,12 @@ test('a file is not processed twice while its fetch is in flight', async () => {
   assert.equal(server.calls.filter(call => call.url.pathname.endsWith('/items')).length, 2);
 });
 
-test('a response that lands after navigation to another PR does not highlight', async () => {
+test('a response that lands after navigation to another PR is dropped, and the card is processed for the new PR', async () => {
   const server = standardServer();
   const gate = deferred();
   const fetch = async (url, options) => {
     await gate.promise;
+    if (url.includes('/pullRequests/43/')) return jsonResponse({ message: 'not found' }, 404);
     return server.fetch(url, options);
   };
   const { dom, window, highlightCalls } = await loadExtension({ fetch });
@@ -248,12 +249,31 @@ test('a response that lands after navigation to another PR does not highlight', 
   gate.resolve();
   await pending;
 
-  assert.equal(highlightedClones(file).length, 0);
-  assert.equal(highlightCalls.length, 0);
-
-  await window.processFileDiff(file);
+  // PR 43 has no iterations here, so the file falls back; the map fetched for PR 42 is never used.
+  assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(() => 'vue'));
   assert.equal(highlightedClones(file).length, INLINE_ROWS.length);
-  assert.ok(server.calls.some(call => call.url.pathname.includes('/pullRequests/43/')));
+});
+
+test('a card that a pass skipped while its fetch was in flight is processed for the new iteration', async () => {
+  const server = standardServer();
+  const gate = deferred();
+  const fetch = async (url, options) => {
+    await gate.promise;
+    return server.fetch(url, options);
+  };
+  const { dom, window, highlightCalls } = await loadExtension({ fetch });
+  const file = mount(window, inlineCard());
+
+  const pending = window.processFileDiff(file);
+  dom.reconfigure({ url: `${PR_URL}&iteration=2&base=1` });
+  window.applySyntaxHighlighting();
+  gate.resolve();
+  await pending;
+
+  assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(([, language]) => language));
+  assert.equal(highlightedClones(file).length, INLINE_ROWS.length);
+  const versions = server.calls.map(call => call.url.searchParams.get('versionDescriptor.version'));
+  assert.ok(versions.includes('src1'));
 });
 
 test('a file removed from the page while its fetch is in flight is left alone', async () => {

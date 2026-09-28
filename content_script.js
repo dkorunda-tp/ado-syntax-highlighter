@@ -104,6 +104,27 @@ function getTemplateDepthChange(text) {
     - countMatches(text, /<\/template(?![\w-])/g);
 }
 
+// Returns the text outside HTML comments. `state.inComment` carries an open comment to the next line.
+function removeHtmlComments(text, state) {
+  let visible = '';
+  let rest = text;
+  while (rest) {
+    if (state.inComment) {
+      const end = rest.indexOf('-->');
+      if (end === -1) break;
+      state.inComment = false;
+      rest = rest.slice(end + 3);
+    } else {
+      const start = rest.indexOf('<!--');
+      if (start === -1) return visible + rest;
+      visible += rest.slice(0, start);
+      state.inComment = true;
+      rest = rest.slice(start + 4);
+    }
+  }
+  return visible;
+}
+
 function findTagEnd(text) {
   let quote = null;
   for (let i = 0; i < text.length; i++) {
@@ -137,7 +158,7 @@ function parseVueSections(text) {
     const after = rest.slice(end + 1);
     if (block.attributes.trimEnd().endsWith('/')) return null;
     if (block.name === 'template') {
-      block.depth = 1 + getTemplateDepthChange(after);
+      block.depth = 1 + getTemplateDepthChange(removeHtmlComments(after, block));
       return block.depth > 0 ? block : null;
     }
     return after.includes(`</${block.name}`) ? null : block;
@@ -156,7 +177,7 @@ function parseVueSections(text) {
       block = readOpenTag(line);
     } else if (block.name === 'template') {
       languages.push('markup');
-      block.depth += getTemplateDepthChange(line);
+      block.depth += getTemplateDepthChange(removeHtmlComments(line, block));
       if (block.depth <= 0) block = null;
     } else if (line.includes(`</${block.name}`)) {
       languages.push('markup');
@@ -258,28 +279,30 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
 }
 
 async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
+  const pathElement = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column .body-s.secondary-text.text-ellipsis');
+  const filePath = pathElement ? pathElement.textContent.trim() : null;
+  let sections = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
-    const pathElement = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column .body-s.secondary-text.text-ellipsis');
-    const filePath = pathElement ? pathElement.textContent.trim() : null;
-    let sections = { old: null, new: null };
     if (filePath) {
-      try {
-        sections = await loadVueSections(context, filePath);
-      } catch (error) {
-        console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
-      }
+      sections = await loadVueSections(context, filePath);
     }
-    if (!fileDiffElement.isConnected || getPullRequestContext(window.location)?.key !== context.key) {
-      return;
-    }
-    highlightLines(fileDiffElement, lineElement => {
-      const location = getDiffLineLocation(lineElement, fileDiffElement);
-      return (location && sections[location.side]?.[location.lineNumber - 1]) || fileLanguage;
-    });
+  } catch (error) {
+    console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
   } finally {
     vueFilesInFlight.delete(fileDiffElement);
   }
+  if (!fileDiffElement.isConnected) {
+    return;
+  }
+  if (getPullRequestContext(window.location)?.key !== context.key) {
+    // The URL changed during the fetch, and a pass for the new URL skipped this file while it was in flight.
+    return processFileDiff(fileDiffElement);
+  }
+  highlightLines(fileDiffElement, lineElement => {
+    const location = getDiffLineLocation(lineElement, fileDiffElement);
+    return (location && sections[location.side]?.[location.lineNumber - 1]) || fileLanguage;
+  });
 }
 
 function processFileDiff(fileDiffElement) {
