@@ -95,9 +95,10 @@ test('a multi-line opening tag gets tag, attr-name and attr-value tokens on ever
   assert.deepEqual(texts(contents[1], '.token.tag .token.punctuation'), ['<']);
   assert.match(contents[1].querySelector('.token.tag').textContent, /^<Datepicker$/);
   assert.deepEqual(texts(contents[2], '.token.tag .token.attr-name'), ['v-model']);
-  assert.deepEqual(texts(contents[2], '.token.tag .token.attr-value'), ['="date"']);
+  assert.deepEqual(texts(contents[2], '.token.tag .token.attr-value'), ['"', '"']);
+  assert.deepEqual(texts(contents[2], '.token.tag .token.typescript'), ['date']);
   assert.deepEqual(texts(contents[3], '.token.tag .token.attr-name'), [':enable-time-picker']);
-  assert.deepEqual(texts(contents[3], '.token.tag .token.attr-value'), ['="false"']);
+  assert.deepEqual(texts(contents[3], '.token.tag .token.typescript .token.boolean'), ['false']);
   assert.deepEqual(texts(contents[4], '.token.tag .token.attr-name'), ['auto-apply']);
   assert.deepEqual(texts(contents[7], '.token.tag .token.attr-name'), ['color']);
   contents.forEach((content, index) => assert.equal(content.textContent, NEW_LINES[index]));
@@ -137,7 +138,7 @@ test('ADO spans in a row survive, and the row still gets the file tokens', async
   const added = contents[0].querySelector('span.added-content');
   assert.equal(added.getAttribute('data-offset'), '13');
   assert.equal(added.textContent, 'date');
-  assert.ok(added.closest('.token.attr-value'));
+  assert.ok(added.closest('.token.tag .token.typescript'));
   assert.deepEqual(texts(contents[0], '.token.tag .token.attr-name'), ['v-model']);
 
   // Non-breaking spaces match spaces in the file line. Prism turns them into spaces, as it does for per-row highlighting.
@@ -158,7 +159,8 @@ test('an ADO span that crosses a token boundary keeps its characters, and a span
   const added = contents[1].querySelector('span.added-content');
   assert.equal(added.textContent, 'model="da');
   assert.deepEqual(texts(added, '.token.attr-name'), ['model']);
-  assert.deepEqual(texts(added, '.token.attr-value .token.punctuation'), ['=', '"']);
+  assert.deepEqual(texts(added, '.token.punctuation'), ['=']);
+  assert.deepEqual(texts(added, '.token.attr-value'), ['"']);
   assert.equal(contents[1].textContent, '    v-model="date"');
 });
 

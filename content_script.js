@@ -99,22 +99,21 @@ function addVueTemplateGrammar() {
     inside: Prism.languages.typescript
   });
   Prism.languages['vue-template'] = Prism.languages.extend('markup', {});
+  // The value is not inside an attr-value token: theme CSS colors attr-value, and TypeScript identifiers are plain
+  // text that would take that string color. Only the quotes are attr-value, as in the single-file view.
   Prism.languages['vue-template'].tag.inside['special-attr'].unshift({
     pattern: /(^|["'\s])(?:v-|[:@#])[^\s=>\/"']+\s*=\s*(?:"[^"]*"|'[^']*')/,
     lookbehind: true,
     inside: {
-      'attr-name': /^[^\s=]+/,
-      'attr-value': {
-        pattern: /=[\s\S]+/,
-        inside: {
-          'value': typescriptPart(/(^=\s*(["']))[\s\S]+(?=\2$)/),
-          'punctuation': [{ pattern: /^=/, alias: 'attr-equals' }, /["']/]
-        }
-      }
+      'value': typescriptPart(/(^[^\s=]+\s*=\s*(["']))[\s\S]+(?=\2$)/),
+      'attr-value': /["']/,
+      'punctuation': { pattern: /=/, alias: 'attr-equals' },
+      'attr-name': /^[^\s=]+/
     }
   });
-  // `comment` and `tag` are greedy, so a `{{ }}` inside a comment or an attribute value stays part of it.
-  Prism.languages.insertBefore('vue-template', 'entity', {
+  // Before `comment` and `tag`, because Vue ends an expression only at `}}`. Both are greedy, so a `{{ }}` inside a
+  // comment or an attribute value still becomes part of that comment or tag.
+  Prism.languages.insertBefore('vue-template', 'comment', {
     'interpolation': {
       pattern: /\{\{[\s\S]*?\}\}/,
       inside: {

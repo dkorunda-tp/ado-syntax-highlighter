@@ -85,17 +85,28 @@ test('an interpolation has brace punctuation and a TypeScript expression', async
   assert.equal(contents[2].textContent, LINES[2]);
 });
 
-test('a v-for value is TypeScript, and its quotes stay attr-value punctuation', async () => {
+test('a v-for value is TypeScript, with = punctuation and attr-value quotes', async () => {
   const { contents } = await addedFile();
   const row = contents[1];
 
   assert.deepEqual(texts(row, '.token.tag .token.attr-name'), ['v-for', ':key']);
-  assert.deepEqual(texts(row, '.token.attr-value > .token.typescript'), ['(group, groupIndex) in stage.groups', "group.label ?? ''"]);
-  assert.deepEqual(texts(row, '.token.attr-value > .token.punctuation'), ['=', '"', '"', '=', '"', '"']);
-  assert.deepEqual(texts(row, '.token.attr-value .token.typescript .token.keyword'), ['in']);
-  assert.deepEqual(texts(row, '.token.attr-value .token.typescript .token.operator'), ['??']);
-  assert.deepEqual(texts(row, '.token.attr-value .token.typescript .token.string'), ["''"]);
+  assert.deepEqual(texts(row, '.token.special-attr > .token.typescript'), ['(group, groupIndex) in stage.groups', "group.label ?? ''"]);
+  assert.deepEqual(texts(row, '.token.special-attr > .token.punctuation'), ['=', '=']);
+  assert.deepEqual(texts(row, '.token.special-attr > .token.attr-value'), ['"', '"', '"', '"']);
+  assert.deepEqual(texts(row, '.token.special-attr .token.typescript .token.keyword'), ['in']);
+  assert.deepEqual(texts(row, '.token.special-attr .token.typescript .token.operator'), ['??']);
+  assert.deepEqual(texts(row, '.token.special-attr .token.typescript .token.string'), ["''"]);
   assert.equal(row.textContent, LINES[1]);
+});
+
+// Theme CSS colors attr-value, and plain TypeScript identifiers would inherit that string color. Monaco
+// colors each TypeScript token by its own type, so the value must not sit inside an attr-value token.
+test('a directive value has no attr-value ancestor, so its identifiers keep the base text color', async () => {
+  const { contents } = await addedFile();
+  const values = [1, 3, 4, 7, 8, 11].flatMap(index => [...contents[index].querySelectorAll('.token.typescript')]);
+
+  assert.ok(values.length >= 6);
+  values.forEach(value => assert.equal(value.closest('.token.attr-value'), null, value.textContent));
 });
 
 test('an @ event with an argument is TypeScript, and plain attributes on the same tag stay strings', async () => {
@@ -103,17 +114,17 @@ test('an @ event with an argument is TypeScript, and plain attributes on the sam
   const row = contents[3];
 
   assert.deepEqual(texts(row, '.token.tag .token.attr-name'), ['@update:model-value', 'class', 'density']);
-  assert.deepEqual(texts(row, '.token.attr-value > .token.typescript'), ['onToggleItem(item)']);
-  assert.deepEqual(texts(row, '.token.attr-value .token.typescript .token.function'), ['onToggleItem']);
-  assert.deepEqual(texts(row, '.token.attr-value'), ['="onToggleItem(item)"', '="x"', '="compact"']);
+  assert.deepEqual(texts(row, '.token.special-attr > .token.typescript'), ['onToggleItem(item)']);
+  assert.deepEqual(texts(row, '.token.special-attr .token.typescript .token.function'), ['onToggleItem']);
+  assert.deepEqual(texts(row, '.token.attr-value'), ['"', '"', '="x"', '="compact"']);
 });
 
 test('a v-slot value is TypeScript, a #slot without a value is an attribute name, and {{ }} in a plain attribute is a string', async () => {
   const { contents } = await addedFile();
 
   assert.deepEqual(texts(contents[4], '.token.tag .token.attr-name'), ['v-slot', 'title']);
-  assert.deepEqual(texts(contents[4], '.token.attr-value > .token.typescript'), ['{ item }']);
-  assert.deepEqual(texts(contents[4], '.token.attr-value'), ['="{ item }"', '="{{ raw }}"']);
+  assert.deepEqual(texts(contents[4], '.token.special-attr > .token.typescript'), ['{ item }']);
+  assert.deepEqual(texts(contents[4], '.token.attr-value'), ['"', '"', '="{{ raw }}"']);
   assert.deepEqual(texts(contents[4], '.token.interpolation'), []);
 
   assert.deepEqual(texts(contents[5], '.token.tag .token.attr-name'), ['#label']);
@@ -124,22 +135,24 @@ test('a multi-line :class object is TypeScript on every row', async () => {
   const { contents } = await addedFile();
 
   assert.deepEqual(texts(contents[7], '.token.tag .token.attr-name'), [':class']);
-  assert.deepEqual(texts(contents[7], '.token.attr-value > .token.punctuation'), ['=', '"']);
-  assert.deepEqual(texts(contents[7], '.token.attr-value .token.typescript .token.punctuation'), ['{']);
-  assert.deepEqual(texts(contents[8], '.token.attr-value .token.typescript .token.operator'), [':', '===']);
-  assert.deepEqual(texts(contents[8], '.token.attr-value .token.typescript .token.punctuation'), ['.', ',']);
-  assert.deepEqual(texts(contents[9], '.token.attr-value .token.typescript .token.punctuation'), ['}']);
-  assert.deepEqual(texts(contents[9], '.token.attr-value > .token.punctuation'), ['"']);
+  assert.deepEqual(texts(contents[7], '.token.special-attr > .token.punctuation'), ['=']);
+  assert.deepEqual(texts(contents[7], '.token.special-attr > .token.attr-value'), ['"']);
+  assert.deepEqual(texts(contents[7], '.token.special-attr .token.typescript .token.punctuation'), ['{']);
+  assert.deepEqual(texts(contents[8], '.token.special-attr .token.typescript .token.operator'), [':', '===']);
+  assert.deepEqual(texts(contents[8], '.token.special-attr .token.typescript .token.punctuation'), ['.', ',']);
+  assert.deepEqual(texts(contents[9], '.token.special-attr .token.typescript .token.punctuation'), ['}']);
+  assert.deepEqual(texts(contents[9], '.token.special-attr > .token.attr-value'), ['"']);
 });
 
 test('a multi-line :aria-labelledby value is TypeScript on its middle row, with quote punctuation on the first and last rows', async () => {
   const { contents } = await addedFile();
 
   assert.deepEqual(texts(contents[10], '.token.tag .token.attr-name'), [':aria-labelledby']);
-  assert.deepEqual(texts(contents[10], '.token.attr-value > .token.punctuation'), ['=', '"']);
-  assert.deepEqual(texts(contents[11], '.token.attr-value .token.typescript .token.template-string'), ['`label-${item.id}`']);
-  assert.deepEqual(texts(contents[11], '.token.attr-value .token.typescript .token.keyword'), ['undefined']);
-  assert.deepEqual(texts(contents[12], '.token.attr-value > .token.punctuation'), ['"']);
+  assert.deepEqual(texts(contents[10], '.token.special-attr > .token.punctuation'), ['=']);
+  assert.deepEqual(texts(contents[10], '.token.special-attr > .token.attr-value'), ['"']);
+  assert.deepEqual(texts(contents[11], '.token.special-attr .token.typescript .token.template-string'), ['`label-${item.id}`']);
+  assert.deepEqual(texts(contents[11], '.token.special-attr .token.typescript .token.keyword'), ['undefined']);
+  assert.deepEqual(texts(contents[12], '.token.special-attr > .token.attr-value'), ['"']);
   // Only the indentation before the closing quote is left of the value on this row.
   assert.equal(texts(contents[12], '.token.typescript').join('').trim(), '');
 });
@@ -162,8 +175,9 @@ test('v-bind:x, v-on:x with modifiers, v-model and v-if values are TypeScript', 
   content.innerHTML = perRow(window, `<a v-bind:href="url" v-on:click.stop="go()" v-model='name' v-if="ok">`, 'vue-template');
 
   assert.deepEqual(texts(content, '.token.attr-name'), ['v-bind:href', 'v-on:click.stop', 'v-model', 'v-if']);
-  assert.deepEqual(texts(content, '.token.attr-value > .token.typescript'), ['url', 'go()', 'name', 'ok']);
-  assert.deepEqual(texts(content, '.token.attr-value > .token.punctuation'), ['=', '"', '"', '=', '"', '"', '=', "'", "'", '=', '"', '"']);
+  assert.deepEqual(texts(content, '.token.special-attr > .token.typescript'), ['url', 'go()', 'name', 'ok']);
+  assert.deepEqual(texts(content, '.token.special-attr > .token.punctuation'), ['=', '=', '=', '=']);
+  assert.deepEqual(texts(content, '.token.special-attr > .token.attr-value'), ['"', '"', '"', '"', "'", "'", '"', '"']);
 });
 
 test('a {{ }} inside an HTML comment stays part of the comment', async () => {
@@ -173,6 +187,18 @@ test('a {{ }} inside an HTML comment stays part of the comment', async () => {
 
   assert.deepEqual(texts(content, '.token.comment'), ['<!-- {{ old }} -->']);
   assert.deepEqual(texts(content, '.token.interpolation'), ['{{ now }}']);
+});
+
+// Vue reads everything up to the first }} as the expression, so a string that looks like a tag or a comment stays in it.
+test('a tag or a comment inside a {{ }} string stays part of the TypeScript expression', async () => {
+  const { window } = await loadExtension();
+  const content = window.document.createElement('div');
+  content.innerHTML = perRow(window, `<p>{{ '<b>' + x }}</p><i>{{ '<!--y-->' }}</i>`, 'vue-template');
+
+  assert.deepEqual(texts(content, '.token.interpolation'), [`{{ '<b>' + x }}`, `{{ '<!--y-->' }}`]);
+  assert.deepEqual(texts(content, '.token.interpolation .token.string'), [`'<b>'`, `'<!--y-->'`]);
+  assert.deepEqual(texts(content, '.token.comment'), []);
+  assert.deepEqual(texts(content, '.token.tag > .token.tag'), ['<p', '</p', '<i', '</i']);
 });
 
 test('plain attributes give the same tokens as markup', async () => {
@@ -195,7 +221,7 @@ test('an ADO span inside an interpolation and inside a directive value survives'
 
   const inDirective = contents[1].querySelector('span.added-content');
   assert.equal(inDirective.textContent, 'onToggleItem');
-  assert.ok(inDirective.closest('.token.attr-value > .token.typescript'));
+  assert.ok(inDirective.closest('.token.special-attr > .token.typescript'));
   assert.equal(contents[1].textContent, LINES[3]);
 });
 
