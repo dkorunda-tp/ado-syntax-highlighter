@@ -52,7 +52,32 @@ test('both models of a .vue file in the single-file diff editor switch to vue', 
   assert.equal(modified.language, 'vue');
 });
 
-test('a model in a Monaco editor outside a diff editor is left alone', async () => {
+test('an added .vue file in the plain editor of the single-file view switches to vue', async () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  const editor = page.fake.createFileEditor(page.window.document);
+  const model = page.fake.createModel('/TopActionBar.vue');
+
+  editor.setModel(model);
+  await page.tick();
+
+  assert.equal(model.language, 'vue');
+});
+
+test('a widget editor nested inside the editor of the single-file view is left alone', async () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  const fileEditor = page.fake.createFileEditor(page.window.document);
+  const widget = page.fake.createWidgetEditor(fileEditor);
+  const model = page.fake.createModel();
+
+  widget.setModel(model);
+  await page.tick();
+
+  assert.equal(model.language, 'plaintext');
+});
+
+test('a model in a Monaco editor outside the changes viewer is left alone', async () => {
   const page = loadBridge();
   page.assignMonaco();
   const container = page.window.document.createElement('div');
@@ -202,7 +227,20 @@ test('late start: a model that an existing editor shows after the start switches
   assert.equal(modified.language, 'vue');
 });
 
-test('late start without a diff editor on the page changes nothing', () => {
+test('late start: the model of an added file in the plain editor switches to vue', () => {
+  let model;
+  loadBridge({
+    monacoFirst: true,
+    beforeBridge: ({ window, fake }) => {
+      model = fake.createModel('/TopActionBar.vue');
+      fake.createFileEditor(window.document).setModel(model);
+    }
+  });
+
+  assert.equal(model.language, 'vue');
+});
+
+test('late start without an editor in the changes viewer changes nothing', () => {
   let model;
   loadBridge({
     monacoFirst: true,

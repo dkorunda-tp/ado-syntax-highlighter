@@ -1,5 +1,5 @@
 // Runs in the page's main world, where ADO's Monaco lives. The single-file view of a pull request is a Monaco
-// diff editor, so it is colored through Monaco itself: .vue files get a Vue language, and the built-in vs and
+// editor, so it is colored through Monaco itself: .vue files get a Vue language, and the built-in vs and
 // vs-dark themes get the token colors of the chosen Prism theme, sent by content_script.js.
 // Anything missing or throwing leaves ADO's own rendering in place.
 (() => {
@@ -204,20 +204,28 @@
     return filePath ? filePath.slice(filePath.lastIndexOf('/') + 1).toLowerCase() : null;
   }
 
+  // The single-file view shows a diff editor for a changed file and a plain editor for an added one, both in
+  // `.repos-changes-viewer`. Monaco widgets with their own editor, such as the rename box, sit inside another
+  // editor's `.monaco-editor` element and are not the view.
+  function isSingleFileViewEditor(editor) {
+    const container = editor.getContainerDomNode();
+    return !!container?.closest('.repos-changes-viewer') && !container.parentElement?.closest('.monaco-editor');
+  }
+
   // Editors created before the bridge started are unknown. After a late start, a model attached to some
-  // editor counts while a diff editor is on the page.
-  function isShownInDiffEditor(model) {
+  // editor counts while the single-file view has an editor on the page.
+  function isShownInSingleFileView(model) {
     let shownByKnownEditor = false;
     for (const editor of editors) {
       if (editor.getModel() !== model) continue;
       shownByKnownEditor = true;
-      if (editor.getContainerDomNode()?.closest('.monaco-diff-editor')) return true;
+      if (isSingleFileViewEditor(editor)) return true;
     }
     if (shownByKnownEditor) return false;
     return startedLate
       && typeof model.isAttachedToEditor === 'function'
       && model.isAttachedToEditor()
-      && !!document.querySelector('.monaco-diff-editor');
+      && !!document.querySelector('.repos-changes-viewer .monaco-editor');
   }
 
   // The original side of the diff has no file name in its URI (for example "2"), so the file comes from the
@@ -227,7 +235,7 @@
     if (!fileName?.endsWith('.vue') || getModelLanguage(model) !== 'plaintext') return false;
     const uriName = (model.uri?.path || '').split('/').pop().toLowerCase();
     if (uriName.includes('.') && uriName !== fileName) return false;
-    return isShownInDiffEditor(model);
+    return isShownInSingleFileView(model);
   }
 
   function updateModel(model) {

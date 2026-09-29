@@ -173,12 +173,21 @@ test('grammar', async t => {
   });
 });
 
-// The single-file view: ADO creates a diff editor and gives it a model per side. The original model has no URI,
-// so Monaco names it "inmemory://model/N".
-function openDiff(monaco, document, fileName) {
+// ADO puts the single-file view's editor in `.repos-changes-viewer > .vss-base-editor.<editorClass>`.
+function viewerHost(document, editorClass) {
+  const viewer = document.createElement('div');
+  viewer.className = 'repos-changes-viewer';
   const host = document.createElement('div');
-  document.body.appendChild(host);
-  const diffEditor = monaco.editor.createDiffEditor(host, {});
+  host.className = `vss-base-editor ${editorClass}`;
+  viewer.appendChild(host);
+  document.body.appendChild(viewer);
+  return host;
+}
+
+// The single-file view of a changed file: ADO creates a diff editor and gives it a model per side. The original
+// model has no URI, so Monaco names it "inmemory://model/N".
+function openDiff(monaco, document, fileName) {
+  const diffEditor = monaco.editor.createDiffEditor(viewerHost(document, 'repos-diff-editor'), {});
   const original = monaco.editor.createModel('<template>\n  <div />\n</template>\n');
   const modified = monaco.editor.createModel('<template>\n  <p />\n</template>\n', undefined, monaco.Uri.parse(`inmemory://model${fileName}`));
   diffEditor.setModel({ original, modified });
@@ -212,6 +221,23 @@ test('a bridge that starts after the diff editor exists still switches its model
 
   assert.equal(original.getModeId(), 'vue');
   assert.equal(modified.getModeId(), 'vue');
+});
+
+test('an added .vue file in a plain editor of the single-file view switches to vue, and an editor nested in it does not', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco, window } = page;
+
+  const fileEditor = monaco.editor.create(viewerHost(window.document, 'repos-file-editor'), {
+    model: monaco.editor.createModel('<template>\n  <p />\n</template>\n', undefined, monaco.Uri.parse(`inmemory://model${VUE_PATH}`))
+  });
+  const widgetHost = window.document.createElement('div');
+  fileEditor.getDomNode().appendChild(widgetHost);
+  const widget = monaco.editor.create(widgetHost, { model: monaco.editor.createModel('newName') });
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+
+  assert.equal(fileEditor.getModel().getModeId(), 'vue');
+  assert.equal(widget.getModel().getModeId(), 'plaintext');
 });
 
 test('the Prism colors reach Monaco through vs, without setTheme', async t => {

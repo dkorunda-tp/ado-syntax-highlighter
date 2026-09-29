@@ -84,7 +84,7 @@ To find the block of each line, the extension reads the full file text of both s
 
 ### Single-File View
 
-When you open one file of a pull request, Azure DevOps shows its diff in a Monaco editor. The extension colors this view through that editor:
+When you open one file of a pull request, Azure DevOps shows it in a Monaco editor: a diff for a changed file, or the file alone for an added file. The extension colors this view through that editor:
 
 - Code in every file type gets the token colors of the theme you selected. With the automatic theme, the light Azure DevOps theme uses One Light and the dark theme uses Tomorrow Night. Background and diff colors stay the same as in Azure DevOps.
 - A `.vue` file gets the same languages per block as in the Files view. The editor already holds the full file text, so this view sends no requests.

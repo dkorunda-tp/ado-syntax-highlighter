@@ -91,11 +91,16 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     return model;
   }
 
+  // Like Monaco, the editor puts its own `.monaco-editor` element inside the container it is given.
   function createEditor(container) {
     let model = null;
     const onDidChangeModel = createEmitter();
     const onDidDispose = createEmitter();
+    const domNode = container.ownerDocument.createElement('div');
+    domNode.className = 'monaco-editor';
+    container.appendChild(domNode);
     const editor = {
+      domNode,
       getModel: () => model,
       getContainerDomNode: () => container,
       onDidChangeModel,
@@ -115,7 +120,18 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     return editor;
   }
 
-  // Same DOM shape as Monaco's diff editor: two inner editors inside `.monaco-diff-editor`.
+  // ADO's single-file view: `.repos-changes-viewer > .vss-base-editor.<editorClass> > ...`.
+  function createViewerHost(document, editorClass) {
+    const viewer = document.createElement('div');
+    viewer.className = 'repos-changes-viewer';
+    const host = document.createElement('div');
+    host.className = `vss-base-editor ${editorClass}`;
+    viewer.appendChild(host);
+    document.body.appendChild(viewer);
+    return host;
+  }
+
+  // A changed file: two inner editors inside `.monaco-diff-editor`, as Monaco builds it.
   function createDiffEditor(document) {
     const element = document.createElement('div');
     element.className = 'monaco-diff-editor side-by-side';
@@ -124,7 +140,7 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     const modifiedNode = document.createElement('div');
     modifiedNode.className = 'editor modified';
     element.append(originalNode, modifiedNode);
-    document.body.appendChild(element);
+    createViewerHost(document, 'repos-diff-editor').appendChild(element);
     const original = createEditor(originalNode);
     const modified = createEditor(modifiedNode);
     return {
@@ -138,7 +154,26 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     };
   }
 
-  return { monaco, calls, createModel, createEditor, createDiffEditor };
+  // An added file: one plain editor, not a diff editor.
+  function createFileEditor(document) {
+    const container = document.createElement('div');
+    createViewerHost(document, 'repos-file-editor').appendChild(container);
+    return createEditor(container);
+  }
+
+  // A Monaco widget with its own editor, such as the rename box, inside another editor's element.
+  function createWidgetEditor(parentEditor) {
+    const document = parentEditor.domNode.ownerDocument;
+    const widgets = document.createElement('div');
+    widgets.className = 'overflowingContentWidgets';
+    const container = document.createElement('div');
+    container.className = 'rename-box';
+    widgets.appendChild(container);
+    parentEditor.domNode.appendChild(widgets);
+    return createEditor(container);
+  }
+
+  return { monaco, calls, createModel, createEditor, createDiffEditor, createFileEditor, createWidgetEditor };
 }
 
 // Loads monaco_bridge.js into a jsdom page. By default the bridge runs first and ADO assigns window.monaco
