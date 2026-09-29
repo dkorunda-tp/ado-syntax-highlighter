@@ -67,15 +67,59 @@ function perRow(window, text, language) {
   return element.innerHTML;
 }
 
-test('template content lines are vue-template; root lines and block tag lines stay markup', async () => {
+test('the template block, its tag lines included, is vue-template; root lines and script tag lines stay markup', async () => {
   const { window, highlightCalls } = await addedFile();
 
   const expected = LINES.map((line, index) => {
-    if (index >= 1 && index <= 17) return 'vue-template';
+    if (index <= 18) return 'vue-template';
     return index === 21 ? 'typescript' : 'markup';
   });
   assert.deepEqual(Array.from(window.parseVueLineLanguages(LINES.join('\n'))), expected);
   assert.deepEqual(highlightCalls.map(call => call.language), expected);
+});
+
+// The template tag lines are part of the template run, so a tag or a comment that crosses one keeps its tokens.
+async function addedFileOf(lines) {
+  const { window } = await loadExtension({ fetch: server(lines.join('\n')).fetch });
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    diff: lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join('')
+  }));
+  await window.processFileDiff(file);
+  return highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
+}
+
+test('a comment that starts on the opening template tag line is a comment on every row', async () => {
+  const lines = ['<template><!--', '  {{ x }}', '--><div />', '</template>'];
+  const contents = await addedFileOf(lines);
+
+  assert.deepEqual(texts(contents[0], '.token.comment'), ['<!--']);
+  assert.deepEqual(texts(contents[1], '.token.comment'), ['  {{ x }}']);
+  assert.deepEqual(texts(contents[1], '.token.interpolation'), []);
+  assert.deepEqual(texts(contents[2], '.token.comment'), ['-->']);
+  assert.deepEqual(texts(contents[2], '.token.tag > .token.tag'), ['<div']);
+  contents.forEach((content, index) => assert.equal(content.textContent, lines[index]));
+});
+
+test('a tag that starts on the opening template tag line keeps its tokens and directive values', async () => {
+  const lines = ['<template><Comp', '  :value="item.id"', '/>', '</template>'];
+  const contents = await addedFileOf(lines);
+
+  assert.deepEqual(texts(contents[0], '.token.tag > .token.tag'), ['<template', '<Comp']);
+  assert.deepEqual(texts(contents[1], '.token.attr-name'), [':value']);
+  assert.deepEqual(texts(contents[1], '.token.special-attr > .token.typescript'), ['item.id']);
+  assert.deepEqual(texts(contents[2], '.token.tag > .token.punctuation'), ['/>']);
+  contents.forEach((content, index) => assert.equal(content.textContent, lines[index]));
+});
+
+test('a tag that ends on the closing template line keeps its tokens and directive values', async () => {
+  const lines = ['<template>', '  <Comp', '    :value="item.id" /></template>'];
+  const contents = await addedFileOf(lines);
+
+  assert.deepEqual(texts(contents[1], '.token.tag > .token.tag'), ['<Comp']);
+  assert.deepEqual(texts(contents[2], '.token.special-attr > .token.typescript'), ['item.id']);
+  assert.deepEqual(texts(contents[2], '.token.tag > .token.tag'), ['</template']);
+  contents.forEach((content, index) => assert.equal(content.textContent, lines[index]));
 });
 
 test('an interpolation has brace punctuation and a TypeScript expression', async () => {

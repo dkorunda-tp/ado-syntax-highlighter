@@ -209,10 +209,14 @@ function parseVueLineLanguages(text) {
     return after.includes(`</${block.name}`) ? null : block;
   };
 
+  // The template tag lines join the template run, so a tag or a comment that crosses one keeps its tokens.
+  // Script and style tag lines stay markup.
+  const tagLineLanguage = name => (name === 'template' ? getVueBlockLanguage(name) : 'markup');
+
   for (const line of splitFileLines(text)) {
     if (!block) {
-      languages.push('markup');
       const match = !rootComment.inComment && line.match(vueBlockOpenPattern);
+      languages.push(match ? tagLineLanguage(match[1]) : 'markup');
       if (match) {
         block = { name: match[1], attributes: '', inOpenTag: true };
         block = readOpenTag(line.slice(match[0].length));
@@ -220,11 +224,11 @@ function parseVueLineLanguages(text) {
         removeHtmlComments(line, rootComment);
       }
     } else if (block.inOpenTag) {
-      languages.push('markup');
+      languages.push(tagLineLanguage(block.name));
       block = readOpenTag(line);
     } else if (block.name === 'template') {
       block.depth += getTemplateDepthChange(removeHtmlComments(line, block));
-      languages.push(block.depth > 0 ? block.language : 'markup');
+      languages.push(block.language);
       if (block.depth <= 0) block = null;
     } else if (line.includes(`</${block.name}`)) {
       languages.push('markup');
