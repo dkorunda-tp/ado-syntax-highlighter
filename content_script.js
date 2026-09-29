@@ -193,6 +193,58 @@ function parseVueLineLanguages(text) {
   return languages;
 }
 
+// Splits a Prism token stream at line breaks. A token that spans lines becomes one token per line with the same type and alias.
+function splitTokensIntoLines(stream) {
+  if (typeof stream === 'string') {
+    return stream.split('\n').map(part => (part ? [part] : []));
+  }
+  if (Array.isArray(stream)) {
+    const lines = [[]];
+    for (const item of stream) {
+      const [first, ...rest] = splitTokensIntoLines(item);
+      lines[lines.length - 1].push(...first);
+      lines.push(...rest);
+    }
+    return lines;
+  }
+  return splitTokensIntoLines(stream.content)
+    .map(part => (part.length ? [new Prism.Token(stream.type, part, stream.alias)] : []));
+}
+
+// Returns { language, text, tokens } per line; index 0 is line 1. Each run of lines with one language is tokenized
+// once, so tags, comments and strings that span lines keep their tokens on every line.
+function parseVueFileLines(text) {
+  const languages = parseVueLineLanguages(text);
+  const lines = (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).split(/\r?\n/);
+  const fileLines = [];
+  for (let start = 0; start < lines.length;) {
+    const language = languages[start];
+    let end = start + 1;
+    while (end < lines.length && languages[end] === language) end++;
+    // The same hooks as Prism.highlight, so embedded languages such as tagged template strings match per-row output.
+    const env = { code: lines.slice(start, end).join('\n'), grammar: Prism.languages[language], language };
+    Prism.hooks.run('before-tokenize', env);
+    env.tokens = Prism.tokenize(env.code, env.grammar);
+    Prism.hooks.run('after-tokenize', env);
+    splitTokensIntoLines(env.tokens).forEach((tokens, index) => {
+      fileLines.push({ language, text: lines[start + index], tokens });
+    });
+    start = end;
+  }
+  return fileLines;
+}
+
+// The file line of the row that Prism highlights now. The row gets that line's tokens when its text is the file line.
+let highlightedFileLine = null;
+const foldNonBreakingSpaces = text => text.replace(/\xa0/g, ' ');
+
+Prism.hooks.add('after-tokenize', env => {
+  const line = highlightedFileLine;
+  if (line && env.language === line.language && foldNonBreakingSpaces(env.code) === foldNonBreakingSpaces(line.text)) {
+    env.tokens = line.tokens;
+  }
+});
+
 function readIterationParam(value) {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
@@ -251,7 +303,7 @@ function keepAdoRequestsFor(context) {
   }
 }
 
-async function loadVueLineLanguages(context, filePaths) {
+async function loadVueFileLines(context, filePaths) {
   keepAdoRequestsFor(context);
   const iterations = await fetchFromAdo(
     `${context.apiBase}/pullRequests/${context.pullRequestId}/iterations?api-version=7.1`,
@@ -266,12 +318,12 @@ async function loadVueLineLanguages(context, filePaths) {
     `${context.apiBase}/items?path=${encodeURIComponent(filePath)}&versionDescriptor.version=${encodeURIComponent(commit)}&versionDescriptor.versionType=commit&api-version=7.1`,
     'text/plain',
     response => response.text()
-  ).then(parseVueLineLanguages, () => null);
-  const [oldLanguages, newLanguages] = await Promise.all([
+  ).then(parseVueFileLines, () => null);
+  const [oldLines, newLines] = await Promise.all([
     loadSide(commits.old, filePaths.old),
     loadSide(commits.new, filePaths.new)
   ]);
-  return { old: oldLanguages, new: newLanguages };
+  return { old: oldLines, new: newLines };
 }
 
 function getDiffLineLocation(lineElement, fileDiffElement) {
@@ -308,11 +360,11 @@ function getFilePaths(fileDiffElement) {
 
 async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   const filePaths = getFilePaths(fileDiffElement);
-  let lineLanguages = { old: null, new: null };
+  let fileLines = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
     if (filePaths) {
-      lineLanguages = await loadVueLineLanguages(context, filePaths);
+      fileLines = await loadVueFileLines(context, filePaths);
     }
   } catch (error) {
     console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
@@ -326,10 +378,11 @@ async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
     // The URL or the file shown in this card changed during the fetch, and a pass skipped the card while it was in flight.
     return processFileDiff(fileDiffElement);
   }
-  highlightLines(fileDiffElement, lineElement => {
+  const getFileLine = lineElement => {
     const location = getDiffLineLocation(lineElement, fileDiffElement);
-    return (location && lineLanguages[location.side]?.[location.lineNumber - 1]) || fileLanguage;
-  });
+    return (location && fileLines[location.side]?.[location.lineNumber - 1]) || null;
+  };
+  highlightLines(fileDiffElement, lineElement => getFileLine(lineElement)?.language || fileLanguage, getFileLine);
 }
 
 function processFileDiff(fileDiffElement) {
@@ -352,7 +405,7 @@ function processFileDiff(fileDiffElement) {
   highlightLines(fileDiffElement, () => language);
 }
 
-function highlightLines(fileDiffElement, getLineLanguage) {
+function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => null) {
   let originalLineElements = fileDiffElement.querySelectorAll('.monospaced-text > .repos-line-content');
 
   originalLineElements.forEach(originalLineElement => {
@@ -374,6 +427,8 @@ function highlightLines(fileDiffElement, getLineLanguage) {
       const code = document.createElement('code'); // Temporary element
       code.className = `language-${language}`;
       code.innerHTML = codeToHighlight;
+      // Every row sets this before it is highlighted, so a row that throws cannot pass its line to the next row.
+      highlightedFileLine = getFileLine(originalLineElement);
       Prism.highlightElement(code, false, () => {
         const contentDiv = document.createElement('div');
         contentDiv.innerHTML = code.innerHTML;
@@ -394,6 +449,7 @@ function highlightLines(fileDiffElement, getLineLanguage) {
         // Insert the highlighted version after the original
         originalLineElement.parentNode.insertBefore(highlightedLine, originalLineElement.nextSibling)
       });
+      highlightedFileLine = null;
     }
   });
 }

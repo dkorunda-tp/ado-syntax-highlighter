@@ -61,23 +61,24 @@ function lineNumber(line) {
   return `<div class="repos-line-number" data-line="${line}"><span class="screen-reader-only">Line ${line}</span>${line}</div>`;
 }
 
-function lineContent(type, code) {
+// `html` replaces `code` when a row needs ADO's own spans, such as span.added-content.
+function lineContent(type, code, html) {
   const label = { added: 'Added', removed: 'Removed', unchanged: 'Unchanged' }[type];
-  return `<div class="repos-line-content ${type}"><span class="screen-reader-only">${label} line</span>${escapeHtml(code)}</div>`;
+  return `<div class="repos-line-content ${type}"><span class="screen-reader-only">${label} line</span>${html ?? escapeHtml(code)}</div>`;
 }
 
 // Inline view: two number columns per row, old line first and new line second.
-function inlineRow({ oldLine = null, newLine = null, type, code }) {
+function inlineRow({ oldLine = null, newLine = null, type, code, html }) {
   return `<div class="repos-diff-contents-row monospaced-text">` +
     `<div class="flex-row secondary-text">${lineNumber(oldLine)}${lineNumber(newLine)}</div>` +
-    `${lineContent(type, code)}</div>`;
+    `${lineContent(type, code, html)}</div>`;
 }
 
 // Side-by-side view: one number column per row.
-function paneRow({ line = null, type, code }) {
+function paneRow({ line = null, type, code, html }) {
   return `<div class="repos-diff-contents-row monospaced-text">` +
     `<div class="flex-row secondary-text">${lineNumber(line)}</div>` +
-    `${lineContent(type, code)}</div>`;
+    `${lineContent(type, code, html)}</div>`;
 }
 
 // Added or deleted file: no splitter panes, and one number column per row, even in side-by-side mode.
