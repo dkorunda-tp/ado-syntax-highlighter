@@ -35,6 +35,8 @@ test('nested template tags close the block only at depth zero', () => {
     '  <template v-if="ready">',
     '    <p>ready</p>',
     '  </template>',
+    '<script>',
+    'not code',
     '  <List><template #item="{ row }">{{ row }}</template></List>',
     '  <Slot><template #empty /></Slot>',
     '</template>',
@@ -42,7 +44,32 @@ test('nested template tags close the block only at depth zero', () => {
     'export default {}',
     '</script>'
   ]), [
-    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'markup', 'typescript', 'markup'
+  ]);
+});
+
+test('a byte order mark before the first block does not hide it', () => {
+  assert.deepEqual(Array.from(window.parseVueSections('﻿<script setup lang="ts">\nconst a = 1\n</script>')),
+    ['markup', 'typescript', 'markup']);
+});
+
+test('block tags inside a root-level HTML comment do not open a block', () => {
+  assert.deepEqual(sections([
+    '<!--',
+    '<script>',
+    'old code',
+    '</script>',
+    '-->',
+    '<!-- disabled:',
+    '<template>',
+    '-->',
+    '<script setup lang="ts">',
+    'const a = 1',
+    '</script>'
+  ]), [
+    'markup', 'markup', 'markup', 'markup', 'markup',
+    'markup', 'markup', 'markup',
     'markup', 'typescript', 'markup'
   ]);
 });
@@ -95,6 +122,24 @@ test('a plain style, a scoped style and a non-scss lang are css', () => {
 
 test("single-quoted lang='scss' is scss", () => {
   assert.deepEqual(sections(["<style lang='scss'>", '$a: 1px;', '</style>']), ['markup', 'scss', 'markup']);
+});
+
+test('only a lang attribute with the exact value scss is scss', () => {
+  assert.deepEqual(sections([
+    '<style lang=scss>',
+    '$a: 1px;',
+    '</style>',
+    '<style data-lang="scss">',
+    '.a {}',
+    '</style>',
+    '<style lang="scss-extra">',
+    '.b {}',
+    '</style>'
+  ]), [
+    'markup', 'scss', 'markup',
+    'markup', 'css', 'markup',
+    'markup', 'css', 'markup'
+  ]);
 });
 
 test('script without lang, and with lang="js", is typescript', () => {
@@ -168,6 +213,27 @@ test('an opening tag with attributes over several lines', () => {
   ]), [
     'markup', 'markup', 'markup', 'markup', 'typescript', 'markup',
     'markup', 'markup', 'markup', 'markup', 'scss', 'markup'
+  ]);
+});
+
+test('a > inside a quoted attribute of a multi-line opening tag does not end the tag', () => {
+  assert.deepEqual(sections([
+    '<style',
+    '  data-note="first',
+    '> second"',
+    '  lang="scss"',
+    '>',
+    '$a: 1px;',
+    '</style>',
+    '<script',
+    '  data-x="a > b"',
+    '  lang="ts"',
+    '>',
+    'const a = 1',
+    '</script>'
+  ]), [
+    'markup', 'markup', 'markup', 'markup', 'markup', 'scss', 'markup',
+    'markup', 'markup', 'markup', 'markup', 'typescript', 'markup'
   ]);
 });
 

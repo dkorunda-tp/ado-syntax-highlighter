@@ -175,14 +175,17 @@ test('a network error falls back', async () => {
   assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(() => 'vue'));
 });
 
-test('a sign-in HTML page with status 200 falls back', async () => {
-  const fetch = async () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => 'text/html; charset=utf-8' },
-    json: async () => { throw new SyntaxError('Unexpected token <'); },
-    text: async () => '<html>sign in</html>'
-  });
+test('a sign-in HTML page with status 200 for the file falls back', async () => {
+  const server = standardServer();
+  const fetch = async (url, options) => {
+    if (!url.includes('/items?')) return server.fetch(url, options);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'text/html; charset=utf-8' },
+      text: async () => '<html>sign in</html>'
+    };
+  };
   const { window, highlightCalls } = await loadExtension({ fetch });
   await window.processFileDiff(mount(window, inlineCard()));
 
@@ -255,7 +258,15 @@ test('a response that lands after navigation to another PR is dropped, and the c
 });
 
 test('a card that a pass skipped while its fetch was in flight is processed for the new iteration', async () => {
-  const server = standardServer();
+  // In src1, old line 5 sits in a style block, so the removed row shows which old-side map was used.
+  const src1Text = ['<template>', '  <div>{{ msg }}</div>', '</template>', '<style>', '.a { color: red; }', '</style>'].join('\n');
+  const server = standardServer({
+    files: {
+      [`common2:${PATH}`]: OLD_TEXT,
+      [`src2:${PATH}`]: NEW_TEXT,
+      [`src1:${PATH}`]: src1Text
+    }
+  });
   const gate = deferred();
   const fetch = async (url, options) => {
     await gate.promise;
@@ -270,10 +281,35 @@ test('a card that a pass skipped while its fetch was in flight is processed for 
   gate.resolve();
   await pending;
 
-  assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(([, language]) => language));
+  assert.deepEqual(languages(highlightCalls),
+    INLINE_ROWS.map(([row, language]) => (row.type === 'removed' ? 'css' : language)));
   assert.equal(highlightedClones(file).length, INLINE_ROWS.length);
-  const versions = server.calls.map(call => call.url.searchParams.get('versionDescriptor.version'));
-  assert.ok(versions.includes('src1'));
+});
+
+test('the same row gets the language of its line in the fetched file, not of its visible text', async () => {
+  const rows = [[{ oldLine: 2, newLine: 2, type: 'unchanged', code: 'a {}' }]];
+  const languageFor = async text => {
+    const server = standardServer({ files: { [`common2:${PATH}`]: text, [`src2:${PATH}`]: text } });
+    const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
+    await window.processFileDiff(mount(window, inlineCard(PATH, rows)));
+    return languages(highlightCalls);
+  };
+
+  assert.deepEqual(await languageFor('<script>\na {}\n</script>'), ['typescript']);
+  assert.deepEqual(await languageFor('<style lang="scss">\na {}\n</style>'), ['scss']);
+  assert.deepEqual(await languageFor('<template>\na {}\n</template>'), ['markup']);
+});
+
+test('a card without the file path element falls back and fetches nothing', async () => {
+  const server = standardServer();
+  const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
+  const file = mount(window, inlineCard());
+  file.querySelector('.body-s.secondary-text.text-ellipsis').remove();
+
+  await window.processFileDiff(file);
+
+  assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(() => 'vue'));
+  assert.equal(server.calls.length, 0);
 });
 
 test('a card that shows another file when its fetch lands does not get the old file map', async () => {

@@ -90,7 +90,7 @@ const vueBlockOpenPattern = /^<(template|script|style)(?![\w-])/;
 
 function getVueBlockLanguage(name, attributes) {
   if (name === 'script') return 'typescript';
-  if (name === 'style') return /\blang\s*=\s*["']?scss\b/.test(attributes) ? 'scss' : 'css';
+  if (name === 'style') return /(?:^|\s)lang\s*=\s*(["']?)scss\1(?=[\s/]|$)/.test(attributes) ? 'scss' : 'css';
   return 'markup';
 }
 
@@ -125,14 +125,14 @@ function removeHtmlComments(text, state) {
   return visible;
 }
 
-function findTagEnd(text) {
-  let quote = null;
+// Returns the index of the `>` that ends an opening tag, or -1. `state.quote` carries an open quote to the next line.
+function findTagEnd(text, state) {
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
-    if (quote) {
-      if (char === quote) quote = null;
+    if (state.quote) {
+      if (char === state.quote) state.quote = null;
     } else if (char === '"' || char === "'") {
-      quote = char;
+      state.quote = char;
     } else if (char === '>') {
       return i;
     }
@@ -143,11 +143,12 @@ function findTagEnd(text) {
 // Returns one Prism language per line; index 0 is line 1.
 function parseVueSections(text) {
   const languages = [];
+  const rootComment = { inComment: false };
   let block = null;
 
   // Reads the rest of an opening tag. Returns the block, or null when the block also closes here.
   const readOpenTag = (rest) => {
-    const end = findTagEnd(rest);
+    const end = findTagEnd(rest, block);
     if (end === -1) {
       block.attributes += `${rest} `;
       return block;
@@ -164,13 +165,15 @@ function parseVueSections(text) {
     return after.includes(`</${block.name}`) ? null : block;
   };
 
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of text.replace(/^﻿/, '').split(/\r?\n/)) {
     if (!block) {
       languages.push('markup');
-      const match = line.match(vueBlockOpenPattern);
+      const match = !rootComment.inComment && line.match(vueBlockOpenPattern);
       if (match) {
         block = { name: match[1], attributes: '', inOpenTag: true };
         block = readOpenTag(line.slice(match[0].length));
+      } else {
+        removeHtmlComments(line, rootComment);
       }
     } else if (block.inOpenTag) {
       languages.push('markup');
