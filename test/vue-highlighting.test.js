@@ -406,6 +406,27 @@ test('one iterations fetch per PR and one file fetch per commit and path', async
   assert.equal(paths.filter(path => path.endsWith('/items')).length, 4);
 });
 
+test('the request cache keeps only the pull request on screen', async () => {
+  const server = standardServer();
+  const { dom, window } = await loadExtension({ fetch: server.fetch });
+  const pr43 = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/43?_a=files';
+  const countFetches = pullRequest => server.calls
+    .filter(call => call.url.pathname.includes(`/pullRequests/${pullRequest}/`)).length;
+
+  await window.processFileDiff(mount(window, inlineCard()));
+  dom.reconfigure({ url: `${PR_URL}&iteration=2` });
+  await window.processFileDiff(mount(window, inlineCard()));
+  assert.equal(countFetches(42), 1);
+
+  dom.reconfigure({ url: pr43 });
+  await window.processFileDiff(mount(window, inlineCard()));
+
+  dom.reconfigure({ url: PR_URL });
+  await window.processFileDiff(mount(window, inlineCard()));
+  assert.equal(countFetches(42), 2);
+  assert.equal(countFetches(43), 1);
+});
+
 test('a failed request is not cached, so a later file retries it', async () => {
   const server = standardServer();
   let failNext = true;

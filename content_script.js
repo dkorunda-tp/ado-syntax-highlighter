@@ -86,6 +86,7 @@ function getTheme(element) {
 // read from the full file text of its side of the diff.
 const vueFilesInFlight = new WeakSet();
 const adoRequests = new Map();
+let adoRequestsPullRequest = null;
 const vueBlockOpenPattern = /^<(template|script|style)(?![\w-])/;
 
 function getVueBlockLanguage(name, attributes) {
@@ -241,7 +242,17 @@ function fetchFromAdo(url, accept, read) {
   return adoRequests.get(url);
 }
 
+// The request cache holds only the pull request on screen; moving to another one empties it.
+function keepAdoRequestsFor(context) {
+  const pullRequest = `${context.apiBase}|${context.pullRequestId}`;
+  if (pullRequest !== adoRequestsPullRequest) {
+    adoRequests.clear();
+    adoRequestsPullRequest = pullRequest;
+  }
+}
+
 async function loadVueSections(context, filePath) {
+  keepAdoRequestsFor(context);
   const iterations = await fetchFromAdo(
     `${context.apiBase}/pullRequests/${context.pullRequestId}/iterations?api-version=7.1`,
     'application/json',
