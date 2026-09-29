@@ -99,8 +99,11 @@ function addVueTemplateGrammar() {
     inside: Prism.languages.typescript
   });
   Prism.languages['vue-template'] = Prism.languages.extend('markup', {});
-  // The value is not inside an attr-value token: theme CSS colors attr-value, and TypeScript identifiers are plain
-  // text that would take that string color. Only the quotes are attr-value, as in the single-file view.
+  // TypeScript identifiers are plain text, so they take the color of the nearest colored token. The value is not
+  // inside an attr-value token, and custom_styles.css gives the `vue-template-tag` element token the row color
+  // instead of the tag color. They then show the base text color, as in the single-file view. Only the quotes are
+  // attr-value, and the tag name keeps its own tag token.
+  Prism.languages['vue-template'].tag.alias = 'vue-template-tag';
   Prism.languages['vue-template'].tag.inside['special-attr'].unshift({
     pattern: /(^|["'\s])(?:v-|[:@#])[^\s=>\/"']+\s*=\s*(?:"[^"]*"|'[^']*')/,
     lookbehind: true,

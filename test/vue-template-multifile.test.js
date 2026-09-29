@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
@@ -99,14 +101,50 @@ test('a v-for value is TypeScript, with = punctuation and attr-value quotes', as
   assert.equal(row.textContent, LINES[1]);
 });
 
-// Theme CSS colors attr-value, and plain TypeScript identifiers would inherit that string color. Monaco
-// colors each TypeScript token by its own type, so the value must not sit inside an attr-value token.
-test('a directive value has no attr-value ancestor, so its identifiers keep the base text color', async () => {
-  const { contents } = await addedFile();
+// Theme CSS colors attr-value and tag, and plain TypeScript identifiers would inherit that color. Monaco colors
+// each TypeScript token by its own type, so identifiers must show the base text color of the row.
+test('a directive value has no attr-value ancestor, and its identifiers keep the base text color', async () => {
+  const BASE = 'rgb(1, 2, 3)';
+  const themeCss = `
+    .prism-one-light .token.tag { color: rgb(200, 0, 0); }
+    .prism-one-light .token.attr-name { color: rgb(0, 200, 0); }
+    .prism-one-light .token.attr-value { color: rgb(0, 0, 200); }
+    .prism-one-light .token.keyword { color: rgb(100, 0, 100); }`;
+  const css = `body { color: ${BASE}; } ${themeCss} ${fs.readFileSync(path.join(__dirname, '..', 'custom_styles.css'), 'utf8')}`;
+  const { window } = await loadExtension({ fetch: server().fetch, css });
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    diff: LINES.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join('')
+  }));
+  await window.processFileDiff(file);
+  const contents = highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
   const values = [1, 3, 4, 7, 8, 11].flatMap(index => [...contents[index].querySelectorAll('.token.typescript')]);
+  const colorOf = element => window.getComputedStyle(element).color;
 
   assert.ok(values.length >= 6);
-  values.forEach(value => assert.equal(value.closest('.token.attr-value'), null, value.textContent));
+  values.forEach(value => {
+    assert.equal(value.closest('.token.attr-value'), null, value.textContent);
+    assert.equal(colorOf(value), BASE, value.textContent);
+  });
+  assert.equal(colorOf(contents[1].querySelector('.token.tag > .token.tag')), 'rgb(200, 0, 0)');
+  assert.equal(colorOf(contents[1].querySelector('.token.attr-name')), 'rgb(0, 200, 0)');
+  assert.equal(colorOf(contents[1].querySelector('.token.special-attr > .token.attr-value')), 'rgb(0, 0, 200)');
+  assert.equal(colorOf(contents[1].querySelector('.token.typescript .token.keyword')), 'rgb(100, 0, 100)');
+});
+
+test('a non-vue tag keeps the theme tag color on its own text', async () => {
+  const css = '.prism-one-light .token.tag { color: rgb(200, 0, 0); } '
+    + fs.readFileSync(path.join(__dirname, '..', 'custom_styles.css'), 'utf8');
+  const { window } = await loadExtension({ css });
+  const content = window.document.createElement('div');
+  content.className = 'prism-one-light';
+  content.innerHTML = window.Prism.highlight('<div :key="a">', window.Prism.languages.markup, 'markup');
+  const wrapper = window.document.createElement('div');
+  wrapper.className = 'ado-syntax-highlighted';
+  wrapper.appendChild(content);
+  window.document.body.appendChild(wrapper);
+
+  assert.equal(window.getComputedStyle(content.querySelector(':scope > .token.tag')).color, 'rgb(200, 0, 0)');
 });
 
 test('an @ event with an argument is TypeScript, and plain attributes on the same tag stay strings', async () => {
@@ -215,7 +253,8 @@ test('plain attributes give the same tokens as markup', async () => {
   const { window } = await loadExtension();
   const text = '<v-btn class="x" density="compact" style="color: red" onclick="go()" disabled>Save &amp; close</v-btn>';
 
-  assert.equal(perRow(window, text, 'vue-template'), perRow(window, text, 'markup'));
+  // The element token of vue-template has one more class, for the row color of text directly inside it.
+  assert.equal(perRow(window, text, 'vue-template').replaceAll('token tag vue-template-tag', 'token tag'), perRow(window, text, 'markup'));
 });
 
 test('an ADO span inside an interpolation and inside a directive value survives', async () => {
