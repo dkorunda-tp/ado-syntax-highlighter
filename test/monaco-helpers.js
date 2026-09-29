@@ -258,6 +258,7 @@ module.exports = {
   THEME_REQUEST_EVENT,
   VUE_PATH,
   SINGLE_FILE_URL,
+  readBridge,
   createFakeMonaco,
   loadBridge,
   vueLanguageCalls,

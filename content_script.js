@@ -475,10 +475,11 @@ function applySyntaxHighlighting() {
 console.debug("ADO Syntax Highlighter: Content script loaded.");
 
 // Load custom patterns and then apply highlighting
+// The Monaco theme goes first, so an error in the multi-file pass cannot stop it.
 loadSettings().then(() => {
-  applySyntaxHighlighting();
   monacoThemePreference = themePreference;
   sendMonacoTheme();
+  applySyntaxHighlighting();
 });
 
 function debounce(func, wait) {

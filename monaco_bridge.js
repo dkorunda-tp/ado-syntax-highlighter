@@ -28,7 +28,8 @@
     tag: ['tag'],
     selector: ['tag.css', 'tag.scss'],
     'attr-name': ['attribute.name'],
-    'attr-value': ['attribute.value', 'attribute.value.html', 'attribute.value.xml'],
+    'attr-value': ['attribute.value', 'attribute.value.html', 'attribute.value.xml',
+      'attribute.value.number', 'attribute.value.unit', 'attribute.value.number.css', 'attribute.value.unit.css', 'attribute.value.hex.css'],
     punctuation: ['delimiter', 'delimiter.html', 'delimiter.xml'],
     operator: ['operator', 'operator.scss', 'operator.sql', 'operator.swift'],
     atrule: ['keyword.css', 'keyword.scss', 'keyword.flow.scss'],
@@ -105,7 +106,7 @@
         { include: '@attributes' }
       ],
       scriptBody: [
-        [/<\/script/, { token: '@rematch', next: '@pop', nextEmbedded: '@pop' }],
+        [/<\/script(?![\w-])/, { token: '@rematch', next: '@pop', nextEmbedded: '@pop' }],
         [/[^<]+/, '']
       ],
       // The state name carries the embedded language: styleTag.css or styleTag.scss.
@@ -117,7 +118,7 @@
         { include: '@attributes' }
       ],
       styleBody: [
-        [/<\/style/, { token: '@rematch', next: '@pop', nextEmbedded: '@pop' }],
+        [/<\/style(?![\w-])/, { token: '@rematch', next: '@pop', nextEmbedded: '@pop' }],
         [/[^<]+/, '']
       ]
     }

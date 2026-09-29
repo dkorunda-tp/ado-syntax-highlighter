@@ -163,6 +163,26 @@ test('grammar', async t => {
     assert.equal(tokenOf(tokens[2], 'let').type, 'keyword.ts');
   });
 
+  await t.test('a longer tag name that starts with script or style does not end the block', () => {
+    const tokens = tokenizeLines(monaco, [
+      '<script>',
+      "const a = '</scripture>'",
+      'let b = 1',
+      '</script>',
+      '<style>',
+      '.a { content: "</stylesheet>"; }',
+      '.b { color: red; }',
+      '</style>'
+    ]);
+
+    assert.deepEqual(languagesOf(tokens[1]), ['typescript']);
+    assert.equal(tokenOf(tokens[2], 'let').type, 'keyword.ts');
+    assert.equal(tokenOf(tokens[3], 'script').type, 'tag.vue');
+    assert.deepEqual(languagesOf(tokens[5]), ['css']);
+    assert.equal(tokenOf(tokens[6], '.b').type, 'tag.css');
+    assert.equal(tokenOf(tokens[7], 'style').type, 'tag.vue');
+  });
+
   await t.test('root-level comments and custom blocks stay markup', () => {
     const tokens = tokenizeLines(monaco, ['<!--', '<script>', '-->', '<i18n>', '{ "en": {} }', '</i18n>', '<script>', 'let a = 1', '</script>']);
 
@@ -238,6 +258,36 @@ test('an added .vue file in a plain editor of the single-file view switches to v
 
   assert.equal(fileEditor.getModel().getModeId(), 'vue');
   assert.equal(widget.getModel().getModeId(), 'plaintext');
+});
+
+// The color Monaco renders for each piece of `text`, read from colorize output and the theme's `.mtkN` rules.
+async function renderedColors(monaco, window, text, language) {
+  const html = await monaco.editor.colorize(text, language, {});
+  const css = [...window.document.querySelectorAll('style.monaco-colors')].map(style => style.textContent).join('\n');
+  const colors = Object.fromEntries([...css.matchAll(/\.mtk(\d+) \{ color: (#[0-9a-f]+); \}/gi)].map(([, id, color]) => [id, color.toLowerCase()]));
+  const container = window.document.createElement('div');
+  container.innerHTML = html;
+  return [...container.querySelectorAll('span[class^="mtk"]')].map(span => ({
+    text: span.textContent,
+    color: colors[span.className.match(/mtk(\d+)/)[1]]
+  }));
+}
+
+test('CSS numbers, units and hex colors take the Prism attr-value color in both bases', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const attrValue = { 'attr-value': { foreground: '#123456', fontStyle: '' } };
+  page.sendTheme({ vs: attrValue, 'vs-dark': attrValue });
+  const css = '.a { width: 4px; color: #fff; }';
+  await waitFor(() => monaco.editor.tokenize(css, 'css')[0].some(token => token.type.startsWith('attribute.value')), 'the css grammar');
+
+  for (const themeName of ['vs', 'vs-dark']) {
+    monaco.editor.setTheme(themeName);
+    const values = (await renderedColors(monaco, window, css, 'css')).filter(piece => /^(4|px|4px|#fff)$/.test(piece.text.trim()));
+    assert.ok(values.length >= 2, `${themeName}: ${JSON.stringify(values)}`);
+    for (const value of values) assert.equal(value.color, '#123456', `${themeName}: ${value.text}`);
+  }
 });
 
 test('the Prism colors reach Monaco through vs, without setTheme', async t => {

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadExtension, mount, fileCard, inlineRow } = require('./helpers');
-const { loadBridge } = require('./monaco-helpers');
+const { loadBridge, readBridge, createFakeMonaco } = require('./monaco-helpers');
 
 // jsdom has no CSS nesting, so these flat rules stand in for the scoped prism.css that the build generates.
 const ONE_LIGHT = `
@@ -101,6 +101,71 @@ test('a theme change does not change the theme of the multi-file view', async ()
   window.processFileDiff(file);
 
   assert.ok(file.querySelector('.ado-syntax-highlighted > .prism-one-light'));
+});
+
+// Collects unhandled rejections instead of letting node:test fail on them, while `run` is in progress.
+async function collectUnhandledRejections(run) {
+  const listeners = process.listeners('unhandledRejection');
+  const rejections = [];
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', reason => rejections.push(reason));
+  try {
+    const result = await run();
+    await new Promise(resolve => setImmediate(resolve));
+    return { result, rejections };
+  } finally {
+    process.removeAllListeners('unhandledRejection');
+    listeners.forEach(listener => process.on('unhandledRejection', listener));
+  }
+}
+
+test('an error in the multi-file pass does not stop the Monaco theme', async () => {
+  const { result, rejections } = await collectUnhandledRejections(() => loadExtension({
+    css: ONE_LIGHT,
+    beforeContent: ({ window }) => {
+      mount(window, fileCard({
+        filePath: '/src/util.ts',
+        diff: inlineRow({ oldLine: 1, newLine: 1, type: 'unchanged', code: 'const a = 1' })
+      }));
+      window.Prism.highlightElement = () => {
+        throw new Error('unexpected markup');
+      };
+    }
+  }));
+
+  assert.deepEqual(rejections.map(error => error.message), ['unexpected markup']);
+  assert.deepEqual(result.themeEvents, [{ vs: ONE_LIGHT_TOKENS, 'vs-dark': ONE_LIGHT_TOKENS }]);
+});
+
+// The real pair: the bridge in the page, the content script sending, and a fake Monaco recording defineTheme.
+function vsRules(fake) {
+  const vs = fake.calls.defineTheme.filter(call => call.themeName === 'vs').at(-1);
+  return vs && JSON.parse(JSON.stringify(vs.themeData.rules));
+}
+
+test('the content script theme reaches the bridge on load and after a theme change', async () => {
+  const fake = createFakeMonaco();
+  const { changeStorage } = await loadExtension({
+    css: ONE_LIGHT + DRACULA,
+    beforeContent: ({ window }) => {
+      window.eval(readBridge());
+      window.monaco = fake.monaco;
+    }
+  });
+  assert.deepEqual(vsRules(fake).find(rule => rule.token === 'comment'), { token: 'comment', foreground: 'a0a1a7', fontStyle: 'italic' });
+
+  changeStorage({ themePreference: { newValue: 'prism-dracula' } });
+  assert.deepEqual(vsRules(fake), [{ token: 'comment', foreground: '708090', fontStyle: '' }]);
+});
+
+test('a bridge that starts after the content script asks for the theme and gets it', async () => {
+  const fake = createFakeMonaco();
+  const { window } = await loadExtension({ css: ONE_LIGHT });
+
+  window.monaco = fake.monaco;
+  window.eval(readBridge());
+
+  assert.deepEqual(vsRules(fake).find(rule => rule.token === 'keyword'), { token: 'keyword', foreground: 'a626a4', fontStyle: '' });
 });
 
 test('every Prism token type the content script sends is one the bridge accepts', async () => {

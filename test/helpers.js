@@ -11,8 +11,9 @@ const PR_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=fi
 // Loads Prism and the content script into a jsdom window. The MutationObserver is stubbed
 // so that tests call processFileDiff themselves and control the timing.
 // `css` stands in for the injected Prism theme styles. `themeEvents` collects the parsed details sent to the
-// Monaco bridge, and `changeStorage` fires a storage change as the options page would.
-async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {}, themePreference = 'prism-one-light', css = '' } = {}) {
+// Monaco bridge, and `changeStorage` fires a storage change as the options page would. `beforeContent` runs after
+// Prism loads and before the content script, as a document_start script would.
+async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {}, themePreference = 'prism-one-light', css = '', beforeContent } = {}) {
   const virtualConsole = new VirtualConsole();
   const dom = new JSDOM(`<!doctype html><html><head><style>${css}</style></head><body></body></html>`, {
     url,
@@ -35,6 +36,7 @@ async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {}, the
   window.document.addEventListener('ado-syntax-highlighter:monaco-theme', event => themeEvents.push(JSON.parse(event.detail)));
   window.fetch = fetch || (() => Promise.reject(new Error('unexpected fetch')));
   window.eval(prismSource);
+  beforeContent?.({ window });
   window.eval(contentScriptSource);
   await new Promise(resolve => window.setTimeout(resolve, 0));
   const changeStorage = (changes, areaName = 'sync') => storageListeners.forEach(listener => listener(changes, areaName));
