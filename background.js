@@ -4,14 +4,22 @@ if (typeof importScripts !== 'undefined') {
   importScripts('browser-polyfill.min.js');
 }
 
-function injectContent(tabId) {
+async function injectContent(tabId) {
   console.log(`ADO Syntax Highlighter: Injecting into custom host on tab ${tabId}`);
-  browser.scripting.insertCSS({
+  // The page is already loaded here, so the bridge takes the Monaco instance that exists, if any.
+  browser.scripting.executeScript({
+    target: { tabId: tabId },
+    files: ["monaco_bridge.js"],
+    world: "MAIN",
+  }).catch(err => console.warn(`Monaco bridge injection warning: ${err.message}`));
+
+  // The content script reads the Prism token colors for Monaco from computed styles, so the CSS goes first.
+  await browser.scripting.insertCSS({
     target: { tabId: tabId },
     files: ["prism/prism.css", "custom_styles.css"],
   }).catch(err => console.warn(`CSS injection warning: ${err.message}`));
 
-  browser.scripting.executeScript({
+  await browser.scripting.executeScript({
     target: { tabId: tabId },
     files: ["browser-polyfill.min.js", "prism/prism.min.js", "content_script.js"],
   });

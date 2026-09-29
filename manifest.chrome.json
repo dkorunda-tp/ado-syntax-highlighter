@@ -45,6 +45,17 @@
         "custom_styles.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.dev.azure.com/*",
+        "*://*.visualstudio.com/*"
+      ],
+      "js": [
+        "monaco_bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ]
 }
