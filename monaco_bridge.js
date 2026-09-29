@@ -50,6 +50,12 @@
     [/[ \t\r\n]+/, '']
   ];
 
+  // Inside the template, a directive (v-..., :x, @x, #x) has a TypeScript value.
+  const templateAttributeRules = [
+    [/(?:v-|[:@#])[^\s"'<>/=]*/, 'attribute.name', '@directive'],
+    ...attributeRules
+  ];
+
   // Top-level blocks: <script> embeds TypeScript, <style> embeds CSS or, with lang="scss", SCSS. The template
   // is tokenized here rather than embedded as html: an embedded block ends at the first matching closing tag
   // on a line, so an embedded template would end at the first nested </template>. Each open <template> pushes
@@ -92,15 +98,38 @@
       templateTag: [
         [/\/>/, 'delimiter', '@pop'],
         [/>/, { token: 'delimiter', switchTo: '@template' }],
-        { include: '@attributes' }
+        ...templateAttributeRules
       ],
       template: [
         [/<!--/, 'comment', '@comment'],
         [/(<)(template)(?![\w-])/, ['delimiter', { token: 'tag', next: '@templateTag' }]],
         [/(<\/)(template)(?![\w-])/, ['delimiter', { token: 'tag', switchTo: '@closingTag' }]],
-        [/(<\/?)([\w\-.:]+)/, ['delimiter', { token: 'tag', next: '@tag' }]],
+        [/(<\/?)([\w\-.:]+)/, ['delimiter', { token: 'tag', next: '@templateElement' }]],
         [/</, 'delimiter'],
-        [/[^<]+/, '']
+        [/\{\{/, { token: 'delimiter', next: '@interpolation', nextEmbedded: 'typescript' }],
+        [/[^<{]+/, ''],
+        [/\{/, '']
+      ],
+      templateElement: [
+        [/\/?>/, 'delimiter', '@pop'],
+        ...templateAttributeRules
+      ],
+      // An embedded block ends at the first match of its pop rule on a line, as Vue ends at the first }} or quote.
+      interpolation: [
+        [/\}\}/, { token: 'delimiter', next: '@pop', nextEmbedded: '@pop' }]
+      ],
+      directive: [
+        [/=/, 'delimiter'],
+        [/[ \t\r\n]+/, ''],
+        [/"/, { token: 'attribute.value', switchTo: '@directiveDoubleQuoted', nextEmbedded: 'typescript' }],
+        [/'/, { token: 'attribute.value', switchTo: '@directiveSingleQuoted', nextEmbedded: 'typescript' }],
+        [/./, { token: '@rematch', next: '@pop' }]
+      ],
+      directiveDoubleQuoted: [
+        [/"/, { token: 'attribute.value', next: '@pop', nextEmbedded: '@pop' }]
+      ],
+      directiveSingleQuoted: [
+        [/'/, { token: 'attribute.value', next: '@pop', nextEmbedded: '@pop' }]
       ],
       scriptTag: [
         [/\/>/, 'delimiter', '@pop'],

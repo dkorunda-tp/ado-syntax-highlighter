@@ -57,7 +57,7 @@ function standardServer(overrides = {}) {
 // Rows of the inline diff between OLD_TEXT and NEW_TEXT, with the language each row must get.
 const INLINE_ROWS = [
   [{ oldLine: 1, newLine: 1, type: 'unchanged', code: '<template>' }, 'markup'],
-  [{ oldLine: 2, newLine: 2, type: 'unchanged', code: '  <div>{{ msg }}</div>' }, 'markup'],
+  [{ oldLine: 2, newLine: 2, type: 'unchanged', code: '  <div>{{ msg }}</div>' }, 'vue-template'],
   [{ oldLine: 3, newLine: 3, type: 'unchanged', code: '</template>' }, 'markup'],
   [{ newLine: 4, type: 'added', code: '' }, 'markup'],
   [{ oldLine: 4, newLine: 5, type: 'unchanged', code: '<script setup lang="ts">' }, 'markup'],
@@ -152,7 +152,7 @@ test('an added file with one number column per row gets the languages of the new
   await window.processFileDiff(file);
 
   assert.deepEqual(languages(highlightCalls), [
-    'markup', 'markup', 'markup', 'markup',
+    'markup', 'vue-template', 'markup', 'markup',
     'markup', 'typescript', 'markup', 'markup',
     'markup', 'scss', 'markup'
   ]);
@@ -169,7 +169,7 @@ test('a deleted file with one number column per row gets the languages of the ol
 
   await window.processFileDiff(file);
 
-  assert.deepEqual(languages(highlightCalls), ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
+  assert.deepEqual(languages(highlightCalls), ['markup', 'vue-template', 'markup', 'markup', 'typescript', 'markup']);
 });
 
 test('a renamed file with an encoding change reads the new path and the Renamed from path', async () => {
@@ -339,7 +339,7 @@ test('the same row gets the language of its line in the fetched file, not of its
 
   assert.deepEqual(await languageFor('<script>\na {}\n</script>'), ['typescript']);
   assert.deepEqual(await languageFor('<style lang="scss">\na {}\n</style>'), ['scss']);
-  assert.deepEqual(await languageFor('<template>\na {}\n</template>'), ['markup']);
+  assert.deepEqual(await languageFor('<template>\na {}\n</template>'), ['vue-template']);
 });
 
 test('a card without the file path element falls back and fetches nothing', async () => {

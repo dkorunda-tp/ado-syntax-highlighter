@@ -89,10 +89,47 @@ const adoRequests = new Map();
 let adoRequestsPullRequest = null;
 const vueBlockOpenPattern = /^<(template|script|style)(?![\w-])/;
 
+// Markup plus Vue template syntax: `{{ expr }}` and the quoted values of directive attributes (`v-*`, `:x`, `@x`, `#x`)
+// are TypeScript. Other attributes keep the markup rules.
+function addVueTemplateGrammar() {
+  const typescriptPart = pattern => ({
+    pattern,
+    lookbehind: true,
+    alias: ['typescript', 'language-typescript'],
+    inside: Prism.languages.typescript
+  });
+  Prism.languages['vue-template'] = Prism.languages.extend('markup', {});
+  Prism.languages['vue-template'].tag.inside['special-attr'].unshift({
+    pattern: /(^|["'\s])(?:v-|[:@#])[^\s=>\/"']+\s*=\s*(?:"[^"]*"|'[^']*')/,
+    lookbehind: true,
+    inside: {
+      'attr-name': /^[^\s=]+/,
+      'attr-value': {
+        pattern: /=[\s\S]+/,
+        inside: {
+          'value': typescriptPart(/(^=\s*(["']))[\s\S]+(?=\2$)/),
+          'punctuation': [{ pattern: /^=/, alias: 'attr-equals' }, /["']/]
+        }
+      }
+    }
+  });
+  // `comment` and `tag` are greedy, so a `{{ }}` inside a comment or an attribute value stays part of it.
+  Prism.languages.insertBefore('vue-template', 'entity', {
+    'interpolation': {
+      pattern: /\{\{[\s\S]*?\}\}/,
+      inside: {
+        'expression': typescriptPart(/(^\{\{)[\s\S]+(?=\}\}$)/),
+        'punctuation': /\{\{|\}\}/
+      }
+    }
+  });
+}
+addVueTemplateGrammar();
+
 function getVueBlockLanguage(name, attributes) {
   if (name === 'script') return 'typescript';
   if (name === 'style') return /(?:^|\s)lang\s*=\s*(["']?)scss\1(?=[\s/]|$)/.test(attributes) ? 'scss' : 'css';
-  return 'markup';
+  return 'vue-template';
 }
 
 function countMatches(text, pattern) {
@@ -184,8 +221,8 @@ function parseVueLineLanguages(text) {
       languages.push('markup');
       block = readOpenTag(line);
     } else if (block.name === 'template') {
-      languages.push('markup');
       block.depth += getTemplateDepthChange(removeHtmlComments(line, block));
+      languages.push(block.depth > 0 ? block.language : 'markup');
       if (block.depth <= 0) block = null;
     } else if (line.includes(`</${block.name}`)) {
       languages.push('markup');

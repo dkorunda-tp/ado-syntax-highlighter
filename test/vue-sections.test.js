@@ -23,7 +23,7 @@ test('script setup lang ts, template and scoped scss style', () => {
     '.a { .b { color: red; } }',
     '</style>'
   ]), [
-    'markup', 'markup', 'markup',
+    'markup', 'vue-template', 'markup',
     'markup', 'typescript', 'markup',
     'markup', 'scss', 'markup'
   ]);
@@ -44,7 +44,7 @@ test('nested template tags close the block only at depth zero', () => {
     'export default {}',
     '</script>'
   ]), [
-    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'markup', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'markup',
     'markup', 'typescript', 'markup'
   ]);
 });
@@ -88,7 +88,7 @@ test('template tags inside HTML comments do not change the template depth', () =
     'const a = 1',
     '</script>'
   ]), [
-    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'markup', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'markup',
     'markup', 'typescript', 'markup'
   ]);
 });
@@ -99,7 +99,7 @@ test('a column-0 script tag inside a template does not open a block', () => {
     '<script>',
     'not code',
     '</template>'
-  ]), ['markup', 'markup', 'markup', 'markup']);
+  ]), ['markup', 'vue-template', 'vue-template', 'markup']);
 });
 
 test('a plain style, a scoped style and a non-scss lang are css', () => {
@@ -160,7 +160,7 @@ test('CRLF text gives the same map as LF text', () => {
     lineLanguages(lines)
   );
   assert.deepEqual(Array.from(window.parseVueLineLanguages(lines.join('\r\n'))),
-    ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
+    ['markup', 'vue-template', 'markup', 'markup', 'typescript', 'markup']);
 });
 
 test('lines between and around blocks are markup', () => {

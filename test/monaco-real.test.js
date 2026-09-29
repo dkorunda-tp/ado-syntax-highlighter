@@ -72,15 +72,17 @@ test('grammar', async t => {
     ];
     const tokens = tokenizeLines(monaco, lines);
 
-    // Only a template that ended early would let the inner <script> on line 10 start TypeScript.
+    // Only a template that ended early would let the inner <script> on line 10 start TypeScript. Directive
+    // values and interpolations on the lines before it are TypeScript.
     for (let index = 0; index <= 11; index++) {
-      assert.deepEqual(languagesOf(tokens[index]), ['vue'], `line ${index + 1}: ${lines[index]}`);
+      assert.ok(languagesOf(tokens[index]).every(language => language === 'vue' || language === 'typescript'), `line ${index + 1}: ${lines[index]}`);
     }
+    for (const index of [9, 10, 11]) assert.deepEqual(languagesOf(tokens[index]), ['vue'], `line ${index + 1}: ${lines[index]}`);
     assert.equal(tokenOf(tokens[0], 'template').type, 'tag.vue');
     assert.equal(tokenOf(tokens[0], '<').type, 'delimiter.vue');
     assert.equal(tokenOf(tokens[1], ':class').type, 'attribute.name.vue');
     assert.equal(tokenOf(tokens[1], '@click').type, 'attribute.name.vue');
-    assert.equal(tokenOf(tokens[1], '"box"').type, 'attribute.value.vue');
+    assert.equal(tokenOf(tokens[1], 'box').type, 'identifier.ts');
     assert.equal(tokenOf(tokens[6], '#empty').type, 'attribute.name.vue');
     assert.ok(visibleTypesOf(tokens[7]).every(type => type.startsWith('comment')), 'a comment inside the template');
     assert.equal(tokenOf(tokens[8], 'span').type, 'tag.vue');
@@ -133,7 +135,7 @@ test('grammar', async t => {
       '</script>'
     ]);
 
-    assert.deepEqual(typesOf(tokens[2]), ['attribute.value.vue']);
+    assert.deepEqual(languagesOf(tokens[2]), ['typescript']);
     assert.equal(tokenOf(tokens[3], 'div').type, 'tag.vue');
     assert.equal(tokenOf(tokens[6], 'let').type, 'keyword.ts');
   });
