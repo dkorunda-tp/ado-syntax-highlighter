@@ -172,6 +172,27 @@ test('a deleted file with one number column per row gets the languages of the ol
   assert.deepEqual(languages(highlightCalls), ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
 });
 
+test('a renamed file with an encoding change reads the new path and the Renamed from path', async () => {
+  const OLD_PATH = '/frontend/src/components/dashboard/AbandonedZerosReport.vue';
+  const server = standardServer({ files: { [`common2:${OLD_PATH}`]: OLD_TEXT, [`src2:${PATH}`]: NEW_TEXT } });
+  const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    encoding: 'Windows-1252 -> utf-8',
+    renamedFrom: OLD_PATH,
+    diff: INLINE_ROWS.map(([row]) => inlineRow(row)).join('')
+  }));
+
+  await window.processFileDiff(file);
+
+  assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(([, language]) => language));
+  const requested = server.calls
+    .filter(call => call.url.pathname.endsWith('/items'))
+    .map(call => `${call.url.searchParams.get('versionDescriptor.version')}:${call.url.searchParams.get('path')}`)
+    .sort();
+  assert.deepEqual(requested, [`common2:${OLD_PATH}`, `src2:${PATH}`]);
+});
+
 test('iteration and base in the URL pick the compared commits', async () => {
   const server = standardServer();
   const { window } = await loadExtension({ url: `${PR_URL}&iteration=2&base=1`, fetch: server.fetch });

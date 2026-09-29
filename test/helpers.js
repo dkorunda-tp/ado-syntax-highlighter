@@ -98,14 +98,24 @@ function sideBySide({ oldRows, newRows }) {
     `</div>`;
 }
 
-function fileCard({ filePath, diff }) {
+// `encoding` and `renamedFrom` add the header rows of a file whose encoding changed or that was renamed.
+// Markup taken from PR 9418, AbandonedAttemptsReport.vue.
+function fileCard({ filePath, diff, encoding, renamedFrom }) {
   const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+  const encodingRow = encoding
+    ? `<div class="flex flex-center body-s secondary-text text-ellipsis"><div class="text-ellipsis">${encoding}</div></div>`
+    : '';
+  const renamedRow = renamedFrom
+    ? `<div class="body-s secondary-text flex-column margin-top-8"><div>Renamed from</div><div class="text-ellipsis">${renamedFrom}</div></div>`
+    : '';
   return `<div class="repos-summary-header">` +
     `<div class="flex-row">` +
     `<div class="repos-change-summary-file-icon-container"><span class="fabric-icon"></span></div>` +
     `<div class="flex-column">` +
     `<div class="text-ellipsis">${fileName}</div>` +
+    encodingRow +
     `<div class="body-s secondary-text text-ellipsis">${filePath}</div>` +
+    renamedRow +
     `</div></div>` +
     `<div class="repos-summary-code-diff">${diff}</div>` +
     `</div>`;

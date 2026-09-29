@@ -251,7 +251,7 @@ function keepAdoRequestsFor(context) {
   }
 }
 
-async function loadVueSections(context, filePath) {
+async function loadVueSections(context, filePaths) {
   keepAdoRequestsFor(context);
   const iterations = await fetchFromAdo(
     `${context.apiBase}/pullRequests/${context.pullRequestId}/iterations?api-version=7.1`,
@@ -262,12 +262,15 @@ async function loadVueSections(context, filePath) {
   if (!commits) {
     throw new Error(`No commits for iteration ${context.iteration} and base ${context.base}`);
   }
-  const loadSide = commit => fetchFromAdo(
+  const loadSide = (commit, filePath) => fetchFromAdo(
     `${context.apiBase}/items?path=${encodeURIComponent(filePath)}&versionDescriptor.version=${encodeURIComponent(commit)}&versionDescriptor.versionType=commit&api-version=7.1`,
     'text/plain',
     response => response.text()
   ).then(parseVueSections, () => null);
-  const [oldSections, newSections] = await Promise.all([loadSide(commits.old), loadSide(commits.new)]);
+  const [oldSections, newSections] = await Promise.all([
+    loadSide(commits.old, filePaths.old),
+    loadSide(commits.new, filePaths.new)
+  ]);
   return { old: oldSections, new: newSections };
 }
 
@@ -290,18 +293,26 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
   return Number.isInteger(lineNumber) && lineNumber > 0 ? { side, lineNumber } : null;
 }
 
-function getFilePath(fileDiffElement) {
-  const pathElement = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column .body-s.secondary-text.text-ellipsis');
-  return pathElement ? pathElement.textContent.trim() : null;
+// The header can show an encoding change before the path, so the new path is the first line that starts
+// with a slash. A renamed file also shows its old path in a "Renamed from" block.
+function getFilePaths(fileDiffElement) {
+  const header = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column');
+  if (!header) return null;
+  const findPath = selector => [...header.querySelectorAll(selector)]
+    .map(element => element.textContent.trim())
+    .find(text => text.startsWith('/'));
+  const newPath = findPath('.body-s.secondary-text.text-ellipsis');
+  if (!newPath) return null;
+  return { old: findPath('.body-s.secondary-text.flex-column .text-ellipsis') || newPath, new: newPath };
 }
 
 async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
-  const filePath = getFilePath(fileDiffElement);
+  const filePaths = getFilePaths(fileDiffElement);
   let sections = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
-    if (filePath) {
-      sections = await loadVueSections(context, filePath);
+    if (filePaths) {
+      sections = await loadVueSections(context, filePaths);
     }
   } catch (error) {
     console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
@@ -311,7 +322,7 @@ async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   if (!fileDiffElement.isConnected) {
     return;
   }
-  if (getPullRequestContext(window.location)?.key !== context.key || getFilePath(fileDiffElement) !== filePath) {
+  if (getPullRequestContext(window.location)?.key !== context.key || getFilePaths(fileDiffElement)?.new !== filePaths?.new) {
     // The URL or the file shown in this card changed during the fetch, and a pass skipped the card while it was in flight.
     return processFileDiff(fileDiffElement);
   }
