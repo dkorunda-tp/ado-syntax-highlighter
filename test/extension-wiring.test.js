@@ -29,7 +29,7 @@ test('the build copies monaco_bridge.js', () => {
   assert.match(commonFiles, /^\tmonaco_bridge\.js \\$/m);
 });
 
-test('a custom host gets the Monaco bridge in the main world and the content script in the isolated world', () => {
+test('a custom host gets the Monaco bridge in the main world and the content script in the isolated world', async () => {
   const scriptCalls = [];
   const browser = {
     scripting: {
@@ -44,11 +44,51 @@ test('a custom host gets the Monaco bridge in the main world and the content scr
   const context = vm.createContext({ browser, console: { log() {}, warn() {} } });
   vm.runInContext(read('background.js'), context);
 
-  context.injectContent(7);
+  await context.injectContent(7);
 
   const bridgeCall = scriptCalls.find(call => call.files.includes('monaco_bridge.js'));
   assert.deepEqual(JSON.parse(JSON.stringify(bridgeCall)), { target: { tabId: 7 }, files: ['monaco_bridge.js'], world: 'MAIN' });
   const isolatedCall = scriptCalls.find(call => call.files.includes('content_script.js'));
   assert.equal(isolatedCall.world, undefined);
   assert.equal(isolatedCall.files.includes('monaco_bridge.js'), false);
+});
+
+// The content script reads the Prism token colors from computed styles, so the Prism CSS must apply first.
+function loadBackgroundWithCss(insertCSS) {
+  const scriptCalls = [];
+  const browser = {
+    scripting: {
+      insertCSS,
+      executeScript: details => {
+        scriptCalls.push(details);
+        return Promise.resolve([]);
+      }
+    },
+    tabs: { onUpdated: { addListener() {} } }
+  };
+  const context = vm.createContext({ browser, console: { log() {}, warn() {} } });
+  vm.runInContext(read('background.js'), context);
+  return { context, contentScriptInjected: () => scriptCalls.some(call => call.files.includes('content_script.js')) };
+}
+
+test('a custom host gets the content script only after the Prism CSS is inserted', async () => {
+  let finishCss;
+  const page = loadBackgroundWithCss(() => new Promise(resolve => {
+    finishCss = resolve;
+  }));
+
+  const injected = page.context.injectContent(7);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.contentScriptInjected(), false);
+
+  finishCss();
+  await injected;
+  assert.equal(page.contentScriptInjected(), true);
+});
+
+test('a custom host still gets the content script when the CSS insertion fails', async () => {
+  const page = loadBackgroundWithCss(() => Promise.reject(new Error('no access')));
+
+  await page.context.injectContent(7);
+  assert.equal(page.contentScriptInjected(), true);
 });

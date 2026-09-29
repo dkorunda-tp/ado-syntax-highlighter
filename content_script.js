@@ -398,7 +398,7 @@ function highlightLines(fileDiffElement, getLineLanguage) {
   });
 }
 
-// The single-file view is a Monaco diff editor, colored by monaco_bridge.js in the page's main world. That
+// The single-file view is a Monaco editor, colored by monaco_bridge.js in the page's main world. That
 // script cannot read extension storage, so the token colors of the chosen Prism theme are sent to it, one set
 // per Monaco base theme. With auto, vs gets the light Prism theme and vs-dark the dark one.
 const MONACO_THEME_EVENT = 'ado-syntax-highlighter:monaco-theme';
