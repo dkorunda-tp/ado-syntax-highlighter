@@ -276,6 +276,27 @@ test('a card that a pass skipped while its fetch was in flight is processed for 
   assert.ok(versions.includes('src1'));
 });
 
+test('a card that shows another file when its fetch lands does not get the old file map', async () => {
+  const server = standardServer();
+  const gate = deferred();
+  const fetch = async (url, options) => {
+    await gate.promise;
+    return server.fetch(url, options);
+  };
+  const { window, highlightCalls } = await loadExtension({ fetch });
+  const file = mount(window, inlineCard());
+
+  const pending = window.processFileDiff(file);
+  file.querySelector('.text-ellipsis').textContent = 'Other.vue';
+  file.querySelector('.body-s.secondary-text.text-ellipsis').textContent = '/src/Other.vue';
+  gate.resolve();
+  await pending;
+
+  // The server has no /src/Other.vue, so every line falls back instead of using the TopActionBar.vue map.
+  assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(() => 'vue'));
+  assert.ok(server.calls.some(call => call.url.searchParams.get('path') === '/src/Other.vue'));
+});
+
 test('a file removed from the page while its fetch is in flight is left alone', async () => {
   const server = standardServer();
   const gate = deferred();

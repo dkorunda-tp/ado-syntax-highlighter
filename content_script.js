@@ -278,9 +278,13 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
   return Number.isInteger(lineNumber) && lineNumber > 0 ? { side, lineNumber } : null;
 }
 
-async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
+function getFilePath(fileDiffElement) {
   const pathElement = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column .body-s.secondary-text.text-ellipsis');
-  const filePath = pathElement ? pathElement.textContent.trim() : null;
+  return pathElement ? pathElement.textContent.trim() : null;
+}
+
+async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
+  const filePath = getFilePath(fileDiffElement);
   let sections = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
@@ -295,8 +299,8 @@ async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   if (!fileDiffElement.isConnected) {
     return;
   }
-  if (getPullRequestContext(window.location)?.key !== context.key) {
-    // The URL changed during the fetch, and a pass for the new URL skipped this file while it was in flight.
+  if (getPullRequestContext(window.location)?.key !== context.key || getFilePath(fileDiffElement) !== filePath) {
+    // The URL or the file shown in this card changed during the fetch, and a pass skipped the card while it was in flight.
     return processFileDiff(fileDiffElement);
   }
   highlightLines(fileDiffElement, lineElement => {
