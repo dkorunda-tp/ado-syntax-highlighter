@@ -80,7 +80,7 @@ In the Files view of a pull request, each line of a `.vue` file gets the languag
 
 Block tag lines and lines outside a block are highlighted as HTML.
 
-To find the block of each line, the extension reads the full file text of both sides of the diff from the Azure DevOps REST API. It uses your current browser session and sends no other credentials. It honors the iteration and base that you select in the pull request. If a request fails, the file shows as plain text. Commit and branch compare pages show `.vue` files as plain text.
+To find the block of each line, the extension reads the full file text of both sides of the diff from the Azure DevOps REST API. It uses your current browser session and sends no other credentials. It honors the iteration and base that you select in the pull request. If a request fails, the lines of that side of the diff show as plain text. Commit and branch compare pages show `.vue` files as plain text.
 
 ## Configuration
 
