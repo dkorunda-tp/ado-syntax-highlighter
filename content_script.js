@@ -270,12 +270,10 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
   if (pane && fileDiffElement.contains(pane)) {
     side = pane.classList.contains('vss-Splitter--pane-fixed') ? 'old' : 'new';
     numberElement = numberElements[0];
-  } else if (lineElement.classList.contains('removed')) {
-    side = 'old';
-    numberElement = numberElements[0];
   } else {
-    side = 'new';
-    numberElement = numberElements[1];
+    side = lineElement.classList.contains('removed') ? 'old' : 'new';
+    // An added or deleted file has one number column. Otherwise the first column is old and the second is new.
+    numberElement = numberElements.length === 1 ? numberElements[0] : numberElements[side === 'old' ? 0 : 1];
   }
   const lineNumber = Number(numberElement?.getAttribute('data-line'));
   return Number.isInteger(lineNumber) && lineNumber > 0 ? { side, lineNumber } : null;

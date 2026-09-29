@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadExtension, mount, fileCard, inlineRow, sideBySide } = require('./helpers');
+const { loadExtension, mount, fileCard, inlineRow, singleColumnRow, sideBySide } = require('./helpers');
 
 let window;
 test.before(async () => {
@@ -63,11 +63,24 @@ test('inline: removed rows read the old number, other rows read the new number',
   ]);
 });
 
-test('inline: a missing number column gives no location', () => {
+test('added or deleted file: the one number column gives the line, and the row class gives the side', () => {
+  const file = mount(window, fileCard({
+    filePath: '/src/A.vue',
+    diff: [
+      singleColumnRow({ line: 3, type: 'added', code: 'x' }),
+      singleColumnRow({ line: 4, type: 'removed', code: 'y' })
+    ].join('')
+  }));
+  assert.deepEqual(locations(file), [
+    { side: 'new', lineNumber: 3 },
+    { side: 'old', lineNumber: 4 }
+  ]);
+});
+
+test('a row without a number column gives no location', () => {
   const file = mount(window, fileCard({
     filePath: '/src/A.vue',
     diff: '<div class="repos-diff-contents-row monospaced-text">' +
-      '<div class="flex-row secondary-text"><div class="repos-line-number" data-line="3">3</div></div>' +
       '<div class="repos-line-content added">x</div></div>'
   }));
   assert.deepEqual(locations(file), [null]);

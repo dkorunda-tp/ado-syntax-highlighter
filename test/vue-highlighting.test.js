@@ -6,6 +6,7 @@ const {
   mount,
   fileCard,
   inlineRow,
+  singleColumnRow,
   sideBySide,
   deferred,
   jsonResponse,
@@ -137,6 +138,38 @@ test('side-by-side: the left pane uses the old file and the right pane the new f
   await window.processFileDiff(file);
 
   assert.deepEqual(languages(highlightCalls), ['markup', 'typescript', 'markup', 'typescript', 'scss']);
+});
+
+test('an added file with one number column per row gets the languages of the new file', async () => {
+  const server = standardServer({ files: { [`src2:${PATH}`]: NEW_TEXT } });
+  const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
+  const lines = NEW_TEXT.split('\n');
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    diff: lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join('')
+  }));
+
+  await window.processFileDiff(file);
+
+  assert.deepEqual(languages(highlightCalls), [
+    'markup', 'markup', 'markup', 'markup',
+    'markup', 'typescript', 'markup', 'markup',
+    'markup', 'scss', 'markup'
+  ]);
+});
+
+test('a deleted file with one number column per row gets the languages of the old file', async () => {
+  const server = standardServer({ files: { [`common2:${PATH}`]: OLD_TEXT } });
+  const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
+  const lines = OLD_TEXT.split('\n');
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    diff: lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'removed', code })).join('')
+  }));
+
+  await window.processFileDiff(file);
+
+  assert.deepEqual(languages(highlightCalls), ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
 });
 
 test('iteration and base in the URL pick the compared commits', async () => {

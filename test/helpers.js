@@ -80,6 +80,16 @@ function paneRow({ line = null, type, code }) {
     `${lineContent(type, code)}</div>`;
 }
 
+// Added or deleted file: no splitter panes, and one number column per row, even in side-by-side mode.
+// Markup taken from PR 9420, LeaveReasonDialog.vue.
+function singleColumnRow({ line = null, type, code }) {
+  return `<div class="repos-diff-contents-row monospaced-text">` +
+    `<div class="repos-add-comment-widget"></div>` +
+    `<div class="padding-horizontal-8 text-right secondary-text">${lineNumber(line)}</div>` +
+    `<div class="repos-collapsed-comment"></div>` +
+    `${lineContent(type, code)}</div>`;
+}
+
 function sideBySide({ oldRows, newRows }) {
   return `<div class="vss-Splitter--container">` +
     `<div class="vss-Splitter--pane-fixed">${oldRows.map(paneRow).join('')}</div>` +
@@ -168,6 +178,7 @@ module.exports = {
   mount,
   inlineRow,
   paneRow,
+  singleColumnRow,
   sideBySide,
   fileCard,
   deferred,
