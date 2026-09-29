@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { SINGLE_FILE_URL, createFakeMonaco, loadBridge, vueLanguageCalls } = require('./monaco-helpers');
 
 const LIGHT = {
@@ -11,7 +13,11 @@ const DARK = {
   comment: { foreground: '#999999', fontStyle: '' },
   keyword: { foreground: '#cc99cd', fontStyle: 'bold' }
 };
-const TS_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=files&path=%2Fsrc%2Futil.ts';
+const PRISM_TYPES = [
+  'comment', 'keyword', 'boolean', 'string', 'property', 'number', 'regex', 'class-name', 'tag', 'selector', 'attr-name',
+  'attr-value', 'punctuation', 'operator', 'atrule', 'variable', 'constant', 'namespace', 'doctype', 'function'
+];
+const TS_URL ='https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=files&path=%2Fsrc%2Futil.ts';
 
 // Opens the single-file view the way ADO does: a diff editor, a model per side, then setModel.
 function openVueDiff(fake, document) {
@@ -484,7 +490,46 @@ test('theme: a Prism type also overrides the more specific built-in rules it wou
   const delimiterTokens = themeFor(page.fake, 'vs').rules
     .filter(rule => rule.foreground === '383a42')
     .map(rule => rule.token);
-  assert.deepEqual(delimiterTokens.sort(), ['delimiter', 'delimiter.html', 'delimiter.xml']);
+  assert.deepEqual(delimiterTokens.sort(), ['annotation', 'delimiter', 'delimiter.html', 'delimiter.xml']);
+});
+
+// Every token color rule of Monaco 0.29.1's built-in vs and vs-dark themes, read from the bundle.
+function builtInRuleTokens() {
+  const bundle = fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'monaco-editor', 'min', 'vs', 'editor', 'editor.main.js'), 'utf8');
+  const tokens = new Set();
+  for (const base of ['vs', 'vs-dark']) {
+    const rules = bundle.match(new RegExp(`base:"${base}",inherit:!1,rules:\\[([^\\]]*)\\]`))[1];
+    for (const [, token] of rules.matchAll(/token:"([^"]*)"/g)) tokens.add(token);
+  }
+  return tokens;
+}
+
+// A built-in rule that no Prism rule replaces keeps its built-in color. These are left on purpose: `invalid` is
+// the TypeScript and JavaScript default token and has no Prism type, `emphasis`, `strong` and `metatag.php` set
+// only a font style, the pug id and class rules match Prism types the probe does not read, and no 0.29.1 grammar
+// emits `meta.tag`.
+const UNMAPPED_BUILT_IN_RULES = ['', 'invalid', 'emphasis', 'strong', 'metatag.php', 'tag.id.pug', 'tag.class.pug', 'meta.tag'];
+
+test('theme: every built-in color rule is replaced by a Prism rule, apart from the listed ones', () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  const allTypes = Object.fromEntries(PRISM_TYPES.map(type => [type, { foreground: '#123456', fontStyle: '' }]));
+  page.sendTheme({ vs: allTypes });
+
+  const mapped = new Set(themeFor(page.fake, 'vs').rules.map(rule => rule.token));
+  const unmapped = [...builtInRuleTokens()].filter(token => !mapped.has(token));
+  assert.deepEqual(unmapped.sort(), [...UNMAPPED_BUILT_IN_RULES].sort());
+});
+
+test('theme: scss function calls and sql built-ins take the Prism function color, annotations the punctuation color', () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  page.sendTheme({ vs: { function: { foreground: '#111111', fontStyle: '' }, punctuation: { foreground: '#222222', fontStyle: '' } } });
+
+  const colorOf = token => themeFor(page.fake, 'vs').rules.find(rule => rule.token === token)?.foreground;
+  assert.equal(colorOf('meta.scss'), '111111');
+  assert.equal(colorOf('predefined.sql'), '111111');
+  assert.equal(colorOf('annotation'), '222222');
 });
 
 test('theme: a payload that arrives before Monaco is applied when ADO assigns it', () => {
@@ -517,7 +562,7 @@ const INVALID_PAYLOADS = {
   'an array': [],
   'null': null,
   'an unknown theme name': { 'hc-black': LIGHT },
-  'an unknown token type': { vs: { ...LIGHT, function: { foreground: '#ffffff', fontStyle: '' } } },
+  'an unknown token type': { vs: { ...LIGHT, builtin: { foreground: '#ffffff', fontStyle: '' } } },
   'a prototype key': '{"vs":{"__proto__":{"foreground":"#ffffff","fontStyle":""}}}',
   'a short color': { vs: { comment: { foreground: '#fff', fontStyle: '' } } },
   'a color without #': { vs: { comment: { foreground: 'a0a1a7', fontStyle: '' } } },

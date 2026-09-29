@@ -290,6 +290,22 @@ test('CSS numbers, units and hex colors take the Prism attr-value color in both 
   }
 });
 
+test('scss function calls take the Prism function color in both bases', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const functionColor = { function: { foreground: '#654321', fontStyle: '' } };
+  page.sendTheme({ vs: functionColor, 'vs-dark': functionColor });
+  const scss = '.a { color: darken($c, 10%); }';
+  await waitFor(() => monaco.editor.tokenize(scss, 'scss')[0].some(token => token.type === 'meta.scss'), 'the scss grammar');
+
+  for (const themeName of ['vs', 'vs-dark']) {
+    monaco.editor.setTheme(themeName);
+    const call = (await renderedColors(monaco, window, scss, 'scss')).find(piece => piece.text.includes('darken'));
+    assert.equal(call?.color, '#654321', `${themeName}: ${JSON.stringify(call)}`);
+  }
+});
+
 function recordSetTheme(monaco) {
   const calls = [];
   const setTheme = monaco.editor.setTheme;

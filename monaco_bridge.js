@@ -31,13 +31,15 @@
     'attr-name': ['attribute.name'],
     'attr-value': ['attribute.value', 'attribute.value.html', 'attribute.value.xml',
       'attribute.value.number', 'attribute.value.unit', 'attribute.value.number.css', 'attribute.value.unit.css', 'attribute.value.hex.css'],
-    punctuation: ['delimiter', 'delimiter.html', 'delimiter.xml'],
+    punctuation: ['delimiter', 'delimiter.html', 'delimiter.xml', 'annotation'],
     operator: ['operator', 'operator.scss', 'operator.sql', 'operator.swift'],
     atrule: ['keyword.css', 'keyword.scss', 'keyword.flow.scss'],
     variable: ['variable', 'variable.predefined', 'variable.parameter'],
     constant: ['constant'],
     namespace: ['namespace'],
-    doctype: ['metatag', 'metatag.html', 'metatag.xml', 'metatag.content.html']
+    doctype: ['metatag', 'metatag.html', 'metatag.xml', 'metatag.content.html'],
+    // Monaco's scss grammar gives a function call such as `darken(` one meta token, and sql its built-ins predefined.
+    function: ['meta.scss', 'predefined.sql']
   };
 
   const attributeRules = [

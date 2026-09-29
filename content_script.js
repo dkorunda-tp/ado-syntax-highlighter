@@ -405,7 +405,7 @@ const MONACO_THEME_EVENT = 'ado-syntax-highlighter:monaco-theme';
 const MONACO_THEME_REQUEST_EVENT = 'ado-syntax-highlighter:monaco-theme-request';
 const monacoPrismTokenTypes = [
   'comment', 'keyword', 'boolean', 'string', 'property', 'number', 'regex', 'class-name', 'tag', 'selector',
-  'attr-name', 'attr-value', 'punctuation', 'operator', 'atrule', 'variable', 'constant', 'namespace', 'doctype'
+  'attr-name', 'attr-value', 'punctuation', 'operator', 'atrule', 'variable', 'constant', 'namespace', 'doctype', 'function'
 ];
 let monacoThemePreference = null;
 

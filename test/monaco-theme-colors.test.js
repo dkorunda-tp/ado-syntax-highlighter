@@ -178,5 +178,6 @@ test('every Prism token type the content script sends is one the bridge accepts'
   page.sendTheme(payload);
 
   assert.ok(Object.keys(payload.vs).length > 10);
+  assert.ok(payload.vs.function, 'the function color is sent, for scss function calls and sql built-ins');
   assert.equal(page.fake.calls.defineTheme.length, 2);
 });
