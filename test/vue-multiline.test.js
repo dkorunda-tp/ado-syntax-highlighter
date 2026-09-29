@@ -51,15 +51,20 @@ function server(files = { [`common2:${PATH}`]: OLD_LINES.join('\n'), [`src2:${PA
   return createAdoServer({ iterations: [iteration(1, 'src1', 'common1'), iteration(2, 'src2', 'common2')], files });
 }
 
+function rowContents(file) {
+  return highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
+}
+
 async function highlight(diff, filePath = PATH, files) {
   const { window } = await loadExtension({ fetch: server(files).fetch });
   const file = mount(window, fileCard({ filePath, diff }));
   await window.processFileDiff(file);
-  return { window, file, contents: highlightedClones(file).map(clone => clone.querySelector(':scope > div')) };
+  return { window, contents: rowContents(file) };
 }
 
-function addedFile() {
-  return highlight(NEW_LINES.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join(''));
+// An added file: every line is an added row, and the new side has the file text of `lines`.
+function addedFile(lines = NEW_LINES, files) {
+  return highlight(lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join(''), PATH, files);
 }
 
 function texts(content, selector) {
@@ -67,7 +72,7 @@ function texts(content, selector) {
 }
 
 // The HTML that per-row highlighting gives, serialized the way the page serializes it.
-function perRow(window, text, language) {
+function perRowHtml(window, text, language) {
   const grammar = window.Prism.languages[language];
   const element = window.document.createElement('div');
   element.innerHTML = grammar ? window.Prism.highlight(text, grammar, language) : window.Prism.util.encode(text);
@@ -125,7 +130,7 @@ test('a multi-line block comment and template string in the script keep their to
 
 test('ADO spans in a row survive, and the row still gets the file tokens', async () => {
   const { contents } = await highlight([
-    inlineRow({ newLine: 3, type: 'added', code: '', html: '    v-model="<span class="added-content" data-offset="13">date</span>"' }),
+    inlineRow({ newLine: 3, type: 'added', html: '    v-model="<span class="added-content" data-offset="13">date</span>"' }),
     inlineRow({ newLine: 4, type: 'added', code: `${'\xa0'.repeat(4)}:enable-time-picker="false"` })
   ].join(''));
 
@@ -142,8 +147,8 @@ test('ADO spans in a row survive, and the row still gets the file tokens', async
 
 test('an ADO span that crosses a token boundary keeps its characters, and a span inside a comment row stays in the comment', async () => {
   const { contents } = await highlight([
-    inlineRow({ oldLine: 3, type: 'removed', code: '', html: '    <span class="removed-content">v-model</span>="date"' }),
-    inlineRow({ newLine: 3, type: 'added', code: '', html: '    v-<span class="added-content">model="da</span>te"' })
+    inlineRow({ oldLine: 3, type: 'removed', html: '    <span class="removed-content">v-model</span>="date"' }),
+    inlineRow({ newLine: 3, type: 'added', html: '    v-<span class="added-content">model="da</span>te"' })
   ].join(''));
 
   const removed = contents[0].querySelector('span.removed-content');
@@ -158,7 +163,7 @@ test('an ADO span that crosses a token boundary keeps its characters, and a span
 });
 
 // A quoted attribute value, a comment with an empty middle line, and CSS and SCSS blocks, each over several lines.
-const MORE_LINES = [
+const VALUE_COMMENT_STYLE_LINES = [
   '<template>',
   '  <div',
   '    class="a',
@@ -181,16 +186,12 @@ const MORE_LINES = [
   '</style>'
 ];
 
-function moreLinesFile() {
-  return highlight(
-    MORE_LINES.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join(''),
-    PATH,
-    { [`src2:${PATH}`]: MORE_LINES.join('\n') }
-  );
+function valueCommentStyleFile() {
+  return addedFile(VALUE_COMMENT_STYLE_LINES, { [`src2:${PATH}`]: VALUE_COMMENT_STYLE_LINES.join('\n') });
 }
 
 test('an attribute value over two rows is an attr-value with its quote punctuation on both rows', async () => {
-  const { contents } = await moreLinesFile();
+  const { contents } = await valueCommentStyleFile();
 
   assert.deepEqual(texts(contents[2], '.token.tag .token.attr-name'), ['class']);
   assert.deepEqual(texts(contents[2], '.token.tag .token.attr-value'), ['="a']);
@@ -201,8 +202,8 @@ test('an attribute value over two rows is an attr-value with its quote punctuati
 });
 
 test('a comment with an empty middle line keeps the rows after it on their own file lines', async () => {
-  const { window, contents } = await moreLinesFile();
-  const lines = window.parseVueFileLines(MORE_LINES.join('\n'));
+  const { window, contents } = await valueCommentStyleFile();
+  const lines = window.parseVueFileLines(VALUE_COMMENT_STYLE_LINES.join('\n'));
 
   assert.equal(lines[6].text, '');
   assert.equal(lines[6].tokens.length, 0);
@@ -213,14 +214,14 @@ test('a comment with an empty middle line keeps the rows after it on their own f
 });
 
 test('a multi-line comment in a scss or css style block is a comment on every row', async () => {
-  const { contents } = await moreLinesFile();
+  const { contents } = await valueCommentStyleFile();
 
   assert.deepEqual(texts(contents[11], '.token.comment'), ['/* one']);
   assert.deepEqual(texts(contents[12], '.token.comment'), ['   two */']);
   assert.deepEqual(texts(contents[13], '.token.variable'), ['$gap']);
   assert.deepEqual(texts(contents[17], '.token.comment'), ['/* three']);
   assert.deepEqual(texts(contents[18], '.token.comment'), ['   four */']);
-  contents.forEach((content, index) => assert.equal(content.textContent, MORE_LINES[index]));
+  contents.forEach((content, index) => assert.equal(content.textContent, VALUE_COMMENT_STYLE_LINES[index]));
 });
 
 test('a row whose text differs from its file line gets per-row highlighting', async () => {
@@ -228,7 +229,7 @@ test('a row whose text differs from its file line gets per-row highlighting', as
     inlineRow({ newLine: 3, type: 'added', code: '    v-model="other"' })
   );
 
-  assert.equal(contents[0].innerHTML, perRow(window, '    v-model="other"', 'markup'));
+  assert.equal(contents[0].innerHTML, perRowHtml(window, '    v-model="other"', 'markup'));
 });
 
 test('side-by-side rows use the tokens of their own side', async () => {
@@ -259,7 +260,7 @@ test('a side whose fetch fails gets per-row highlighting', async () => {
     inlineRow({ newLine: 3, type: 'added', code: '    v-model="date"' })
   ].join(''), PATH, { [`src2:${PATH}`]: NEW_LINES.join('\n') });
 
-  assert.equal(contents[0].innerHTML, perRow(window, '    v-model="date"', 'vue'));
+  assert.equal(contents[0].innerHTML, perRowHtml(window, '    v-model="date"', 'vue'));
   assert.deepEqual(texts(contents[1], '.token.attr-name'), ['v-model']);
 });
 
@@ -281,8 +282,8 @@ test('a side whose tokenizing throws gets per-row highlighting, and the other si
 
   await window.processFileDiff(file);
 
-  const contents = highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
-  assert.equal(contents[0].innerHTML, perRow(window, '    v-model="date"', 'vue'));
+  const contents = rowContents(file);
+  assert.equal(contents[0].innerHTML, perRowHtml(window, '    v-model="date"', 'vue'));
   assert.deepEqual(texts(contents[1], '.token.attr-name'), ['v-model']);
 });
 
@@ -316,6 +317,6 @@ test('a non-vue file keeps per-row highlighting, also after a .vue file', async 
 
   window.processFileDiff(file);
 
-  const contents = highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
-  assert.deepEqual(contents.map(content => content.innerHTML), rows.map(code => perRow(window, code, 'html')));
+  const contents = rowContents(file);
+  assert.deepEqual(contents.map(content => content.innerHTML), rows.map(code => perRowHtml(window, code, 'html')));
 });

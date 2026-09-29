@@ -86,10 +86,10 @@ function inlineRow({ oldLine = null, newLine = null, type, code, html }) {
 }
 
 // Side-by-side view: one number column per row.
-function paneRow({ line = null, type, code, html }) {
+function paneRow({ line = null, type, code }) {
   return `<div class="repos-diff-contents-row monospaced-text">` +
     `<div class="flex-row secondary-text">${lineNumber(line)}</div>` +
-    `${lineContent(type, code, html)}</div>`;
+    `${lineContent(type, code)}</div>`;
 }
 
 // Added or deleted file: no splitter panes, and one number column per row, even in side-by-side mode.
