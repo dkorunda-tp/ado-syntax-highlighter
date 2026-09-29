@@ -10,6 +10,7 @@
   const THEME_EVENT = 'ado-syntax-highlighter:monaco-theme';
   const THEME_REQUEST_EVENT = 'ado-syntax-highlighter:monaco-theme-request';
   const THEME_NAMES = ['vs', 'vs-dark'];
+  const ACTIVE_THEME_NAMES = ['vs', 'vs-dark', 'hc-black'];
   const FONT_STYLES = ['', 'italic', 'bold', 'italic bold'];
   // ADO can reset a model's language; after this many re-applies ADO keeps it.
   const MAX_LANGUAGE_APPLIES = 3;
@@ -127,6 +128,7 @@
   let monaco = null;
   let startedLate = false;
   let themePayload = null;
+  let themeRedrawPending = false;
   const editors = new Set();
   const languageApplies = new WeakMap();
 
@@ -180,6 +182,23 @@
     })));
   }
 
+  // Monaco's theme is page-wide, and every editor element carries its name as a class. Null means no editor yet.
+  function getActiveThemeName() {
+    const editorElement = document.querySelector('.monaco-editor');
+    if (!editorElement) return null;
+    return ACTIVE_THEME_NAMES.find(name => editorElement.classList.contains(name)) || '';
+  }
+
+  // ADO's Monaco does not redraw the active theme after defineTheme, so it is set again under the name ADO chose.
+  // With no editor on the page yet, the first editor that is created does it.
+  function redrawActiveTheme() {
+    const themeName = getActiveThemeName();
+    themeRedrawPending = themeName === null;
+    if (themeName && typeof monaco.editor.setTheme === 'function') {
+      guarded(() => monaco.editor.setTheme(themeName))();
+    }
+  }
+
   // Redefining the built-in names keeps ADO's light or dark choice and its editor and diff colors.
   function applyTheme() {
     if (!monaco || !themePayload || typeof monaco.editor.defineTheme !== 'function') return;
@@ -193,6 +212,7 @@
         colors: {}
       }))();
     }
+    redrawActiveTheme();
   }
 
   function getModelLanguage(model) {
@@ -280,6 +300,12 @@
   function install(api) {
     if (monaco || !isPlainObject(api?.editor) || !isPlainObject(api?.languages)) return;
     monaco = api;
+    if (typeof api.editor.onDidCreateEditor === 'function') {
+      // The new editor's element is on the page one tick later.
+      api.editor.onDidCreateEditor(guarded(() => setTimeout(guarded(() => {
+        if (themeRedrawPending) redrawActiveTheme();
+      }), 0)));
+    }
     applyTheme();
     guarded(startVueLanguage)();
   }

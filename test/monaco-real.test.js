@@ -290,16 +290,36 @@ test('CSS numbers, units and hex colors take the Prism attr-value color in both 
   }
 });
 
-test('the Prism colors reach Monaco through vs, without setTheme', async t => {
+function recordSetTheme(monaco) {
+  const calls = [];
+  const setTheme = monaco.editor.setTheme;
+  monaco.editor.setTheme = name => {
+    calls.push(name);
+    return setTheme(name);
+  };
+  return calls;
+}
+
+test('a theme that arrives before any editor is set again on the first editor, under the name ADO chose', async t => {
   const page = await loadRealMonaco();
   t.after(() => page.close());
   const { monaco, window } = page;
-  const setThemeCalls = [];
-  const setTheme = monaco.editor.setTheme;
-  monaco.editor.setTheme = name => {
-    setThemeCalls.push(name);
-    return setTheme(name);
-  };
+  monaco.editor.setTheme('vs-dark');
+  const setThemeCalls = recordSetTheme(monaco);
+
+  page.sendTheme({ 'vs-dark': { comment: { foreground: '#999999', fontStyle: '' } } });
+  assert.deepEqual(setThemeCalls, []);
+  openDiff(monaco, window.document, VUE_PATH);
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+
+  assert.deepEqual(setThemeCalls, ['vs-dark']);
+});
+
+test('the Prism colors reach Monaco through vs, set again under the active name', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const setThemeCalls = recordSetTheme(monaco);
   openDiff(monaco, window.document, VUE_PATH);
 
   page.sendTheme({
@@ -310,5 +330,5 @@ test('the Prism colors reach Monaco through vs, without setTheme', async t => {
   const css = [...window.document.querySelectorAll('style.monaco-colors')].map(style => style.textContent).join('\n').toLowerCase();
   assert.match(css, /color: #a0a1a7/);
   assert.match(css, /background-color: #fffffe/, 'the vs editor background stays');
-  assert.deepEqual(setThemeCalls, []);
+  assert.deepEqual(setThemeCalls, ['vs']);
 });

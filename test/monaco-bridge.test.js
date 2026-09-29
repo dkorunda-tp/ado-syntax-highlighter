@@ -370,7 +370,7 @@ test('the bridge asks the content script for the theme when it starts', () => {
   assert.equal(page.themeRequests.length, 1);
 });
 
-test('theme: vs and vs-dark are redefined on their own base with inherit, and setTheme is never called', () => {
+test('theme: vs and vs-dark are redefined on their own base with inherit', () => {
   const page = loadBridge();
   page.assignMonaco();
   page.sendTheme({ vs: LIGHT, 'vs-dark': DARK });
@@ -382,8 +382,86 @@ test('theme: vs and vs-dark are redefined on their own base with inherit, and se
   assert.deepEqual(vs.colors, {});
   assert.equal(dark.base, 'vs-dark');
   assert.equal(dark.inherit, true);
-  assert.deepEqual(page.fake.calls.setTheme, []);
   assert.equal(page.fake.calls.defineTheme.some(call => call.themeName === 'hc-black'), false);
+});
+
+// ADO's Monaco does not redraw the active theme after defineTheme, so the bridge sets it again by the same name.
+for (const activeTheme of ['vs', 'vs-dark', 'hc-black']) {
+  test(`theme: after the redefinition, the active ${activeTheme} theme is set again`, () => {
+    const page = loadBridge({ fake: createFakeMonaco({ activeTheme }) });
+    page.assignMonaco();
+    openVueDiff(page.fake, page.window.document);
+
+    page.sendTheme({ vs: LIGHT, 'vs-dark': DARK });
+
+    assert.deepEqual(page.fake.calls.themeOrder, ['defineTheme:vs', 'defineTheme:vs-dark', `setTheme:${activeTheme}`]);
+  });
+}
+
+test('theme: with no editor yet, the active theme is set again once the first editor exists', async () => {
+  const page = loadBridge({ fake: createFakeMonaco({ activeTheme: 'vs-dark' }) });
+  page.assignMonaco();
+  page.sendTheme({ vs: LIGHT, 'vs-dark': DARK });
+  assert.deepEqual(page.fake.calls.setTheme, []);
+
+  openVueDiff(page.fake, page.window.document);
+  await page.tick();
+  page.fake.createFileEditor(page.window.document);
+  await page.tick();
+
+  assert.deepEqual(page.fake.calls.setTheme, ['vs-dark']);
+});
+
+test('theme: a payload that arrives before Monaco is set again on the first editor', async () => {
+  const page = loadBridge();
+  page.sendTheme({ vs: LIGHT });
+  page.assignMonaco();
+
+  page.fake.createFileEditor(page.window.document);
+  await page.tick();
+
+  assert.deepEqual(page.fake.calls.themeOrder, ['defineTheme:vs', 'setTheme:vs']);
+});
+
+test('theme: a later payload, as after an options change, sets the active theme again', () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  openVueDiff(page.fake, page.window.document);
+  page.sendTheme({ vs: LIGHT });
+
+  page.sendTheme({ vs: { comment: { foreground: '#123456', fontStyle: '' } } });
+
+  assert.deepEqual(page.fake.calls.themeOrder, ['defineTheme:vs', 'setTheme:vs', 'defineTheme:vs', 'setTheme:vs']);
+});
+
+test('theme: an editor theme that ADO did not take from the built-in names is not set', () => {
+  const page = loadBridge({ fake: createFakeMonaco({ activeTheme: 'ado-custom' }) });
+  page.assignMonaco();
+  openVueDiff(page.fake, page.window.document);
+
+  page.sendTheme({ vs: LIGHT });
+
+  assert.deepEqual(page.fake.calls.setTheme, []);
+});
+
+test('theme: a throwing setTheme does not escape into ADO', () => {
+  const fake = createFakeMonaco({ throwing: ['editor.setTheme'] });
+  const page = loadBridge({ fake });
+  page.assignMonaco();
+  openVueDiff(fake, page.window.document);
+
+  assert.doesNotThrow(() => page.sendTheme({ vs: LIGHT }));
+  assert.ok(themeFor(fake, 'vs'));
+});
+
+test('theme: without setTheme, the themes are still redefined', () => {
+  const fake = createFakeMonaco({ remove: ['editor.setTheme'] });
+  const page = loadBridge({ fake });
+  page.assignMonaco();
+  openVueDiff(fake, page.window.document);
+
+  assert.doesNotThrow(() => page.sendTheme({ vs: LIGHT }));
+  assert.ok(themeFor(fake, 'vs'));
 });
 
 test('theme: rules carry the Prism foreground without # and the font style', () => {

@@ -26,14 +26,15 @@ function createEmitter() {
 }
 
 // A stand-in for ADO's Monaco 0.29 API surface. Models without a URI get "/1", "/2", ... as Monaco does.
-// `remove` deletes functions by "editor.name" or "languages.name"; `throwing` makes them throw.
-function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss', 'html'], remove = [], throwing = [] } = {}) {
+// `remove` deletes functions by "editor.name" or "languages.name"; `throwing` makes them throw. Like ADO's build,
+// defineTheme does not redraw; `activeTheme` is the theme class that every editor element carries.
+function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss', 'html'], remove = [], throwing = [], activeTheme = 'vs' } = {}) {
   const onDidCreateEditor = createEmitter();
   const onDidCreateModel = createEmitter();
   const onDidChangeModelLanguage = createEmitter();
   const models = [];
   const languageIds = [...languages];
-  const calls = { setModelLanguage: [], defineTheme: [], setTheme: [], register: [], setMonarchTokensProvider: [] };
+  const calls = { setModelLanguage: [], defineTheme: [], setTheme: [], register: [], setMonarchTokensProvider: [], themeOrder: [] };
   let nextModelId = 1;
 
   const monaco = {
@@ -50,9 +51,11 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
       },
       defineTheme(themeName, themeData) {
         calls.defineTheme.push({ themeName, themeData });
+        calls.themeOrder.push(`defineTheme:${themeName}`);
       },
       setTheme(themeName) {
         calls.setTheme.push(themeName);
+        calls.themeOrder.push(`setTheme:${themeName}`);
       }
     },
     languages: {
@@ -97,7 +100,7 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     const onDidChangeModel = createEmitter();
     const onDidDispose = createEmitter();
     const domNode = container.ownerDocument.createElement('div');
-    domNode.className = 'monaco-editor';
+    domNode.className = `monaco-editor ${activeTheme}`;
     container.appendChild(domNode);
     const editor = {
       domNode,
