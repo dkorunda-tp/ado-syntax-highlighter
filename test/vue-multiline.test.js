@@ -180,6 +180,49 @@ test('a side whose fetch fails gets per-row highlighting', async () => {
   assert.deepEqual(texts(contents[1], '.token.attr-name'), ['v-model']);
 });
 
+test('a side whose tokenizing throws gets per-row highlighting, and the other side keeps its tokens', async () => {
+  const oldText = [...OLD_LINES, '<!-- tokenizer fails here -->'].join('\n');
+  const { window } = await loadExtension({ fetch: server({ [`common2:${PATH}`]: oldText, [`src2:${PATH}`]: NEW_LINES.join('\n') }).fetch });
+  const tokenize = window.Prism.tokenize;
+  window.Prism.tokenize = (code, grammar) => {
+    if (code.includes('tokenizer fails here')) throw new Error('tokenizer failure');
+    return tokenize(code, grammar);
+  };
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    diff: [
+      inlineRow({ oldLine: 3, type: 'removed', code: '    v-model="date"' }),
+      inlineRow({ newLine: 3, type: 'added', code: '    v-model="date"' })
+    ].join('')
+  }));
+
+  await window.processFileDiff(file);
+
+  const contents = highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
+  assert.equal(contents[0].innerHTML, perRow(window, '    v-model="date"', 'vue'));
+  assert.deepEqual(texts(contents[1], '.token.attr-name'), ['v-model']);
+});
+
+test('a row that throws while it is highlighted does not give its file tokens to a later highlight', async () => {
+  const { window } = await loadExtension({ fetch: server().fetch });
+  const highlightElement = window.Prism.highlightElement;
+  window.Prism.highlightElement = function () {
+    window.Prism.highlightElement = highlightElement;
+    throw new Error('highlight failure');
+  };
+  const file = mount(window, fileCard({
+    filePath: PATH,
+    diff: inlineRow({ newLine: 3, type: 'added', code: '    v-model="date"' })
+  }));
+
+  await assert.rejects(window.processFileDiff(file), /highlight failure/);
+
+  assert.equal(
+    window.Prism.highlight('    v-model="date"', window.Prism.languages.markup, 'markup'),
+    window.Prism.util.encode('    v-model="date"')
+  );
+});
+
 test('a non-vue file keeps per-row highlighting, also after a .vue file', async () => {
   const { window } = await addedFile();
   const rows = ['  <Datepicker', '    v-model="date"', '  />'];

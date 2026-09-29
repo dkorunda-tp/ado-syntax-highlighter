@@ -238,6 +238,16 @@ function parseVueFileLines(text) {
 let highlightedFileLine = null;
 const foldNonBreakingSpaces = text => text.replace(/\xa0/g, ' ');
 
+// Runs `highlight` with `fileLine` as the line of the row, and clears it also when `highlight` throws.
+function withHighlightedFileLine(fileLine, highlight) {
+  highlightedFileLine = fileLine;
+  try {
+    highlight();
+  } finally {
+    highlightedFileLine = null;
+  }
+}
+
 Prism.hooks.add('after-tokenize', env => {
   const line = highlightedFileLine;
   if (line && env.language === line.language && foldNonBreakingSpaces(env.code) === foldNonBreakingSpaces(line.text)) {
@@ -318,7 +328,7 @@ async function loadVueFileLines(context, filePaths) {
     `${context.apiBase}/items?path=${encodeURIComponent(filePath)}&versionDescriptor.version=${encodeURIComponent(commit)}&versionDescriptor.versionType=commit&api-version=7.1`,
     'text/plain',
     response => response.text()
-  ).then(parseVueFileLines, () => null);
+  ).then(parseVueFileLines).catch(() => null);
   const [oldLines, newLines] = await Promise.all([
     loadSide(commits.old, filePaths.old),
     loadSide(commits.new, filePaths.new)
@@ -427,9 +437,7 @@ function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => nu
       const code = document.createElement('code'); // Temporary element
       code.className = `language-${language}`;
       code.innerHTML = codeToHighlight;
-      // Every row sets this before it is highlighted, so a row that throws cannot pass its line to the next row.
-      highlightedFileLine = getFileLine(originalLineElement);
-      Prism.highlightElement(code, false, () => {
+      withHighlightedFileLine(getFileLine(originalLineElement), () => Prism.highlightElement(code, false, () => {
         const contentDiv = document.createElement('div');
         contentDiv.innerHTML = code.innerHTML;
         contentDiv.classList.add(getTheme(originalLineElement));
@@ -448,8 +456,7 @@ function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => nu
 
         // Insert the highlighted version after the original
         originalLineElement.parentNode.insertBefore(highlightedLine, originalLineElement.nextSibling)
-      });
-      highlightedFileLine = null;
+      }));
     }
   });
 }
