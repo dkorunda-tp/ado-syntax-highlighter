@@ -142,7 +142,7 @@ function findTagEnd(text, state) {
 }
 
 // Returns one Prism language per line; index 0 is line 1.
-function parseVueSections(text) {
+function parseVueLineLanguages(text) {
   const languages = [];
   const rootComment = { inComment: false };
   let block = null;
@@ -166,7 +166,7 @@ function parseVueSections(text) {
     return after.includes(`</${block.name}`) ? null : block;
   };
 
-  for (const line of text.replace(/^﻿/, '').split(/\r?\n/)) {
+  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
     if (!block) {
       languages.push('markup');
       const match = !rootComment.inComment && line.match(vueBlockOpenPattern);
@@ -221,7 +221,7 @@ function chooseDiffCommits(iterations, iterationId, baseId) {
   return newCommit && oldCommit ? { old: oldCommit, new: newCommit } : null;
 }
 
-// Same-origin fetch, so the page session cookies go with it. A failed request leaves the cache.
+// Same-origin fetch, so the page session cookies go with it. A failed request is removed from the cache, so a later call retries it.
 function fetchFromAdo(url, accept, read) {
   if (!adoRequests.has(url)) {
     const request = fetch(url, {
@@ -251,7 +251,7 @@ function keepAdoRequestsFor(context) {
   }
 }
 
-async function loadVueSections(context, filePaths) {
+async function loadVueLineLanguages(context, filePaths) {
   keepAdoRequestsFor(context);
   const iterations = await fetchFromAdo(
     `${context.apiBase}/pullRequests/${context.pullRequestId}/iterations?api-version=7.1`,
@@ -266,12 +266,12 @@ async function loadVueSections(context, filePaths) {
     `${context.apiBase}/items?path=${encodeURIComponent(filePath)}&versionDescriptor.version=${encodeURIComponent(commit)}&versionDescriptor.versionType=commit&api-version=7.1`,
     'text/plain',
     response => response.text()
-  ).then(parseVueSections, () => null);
-  const [oldSections, newSections] = await Promise.all([
+  ).then(parseVueLineLanguages, () => null);
+  const [oldLanguages, newLanguages] = await Promise.all([
     loadSide(commits.old, filePaths.old),
     loadSide(commits.new, filePaths.new)
   ]);
-  return { old: oldSections, new: newSections };
+  return { old: oldLanguages, new: newLanguages };
 }
 
 function getDiffLineLocation(lineElement, fileDiffElement) {
@@ -308,11 +308,11 @@ function getFilePaths(fileDiffElement) {
 
 async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   const filePaths = getFilePaths(fileDiffElement);
-  let sections = { old: null, new: null };
+  let lineLanguages = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
     if (filePaths) {
-      sections = await loadVueSections(context, filePaths);
+      lineLanguages = await loadVueLineLanguages(context, filePaths);
     }
   } catch (error) {
     console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
@@ -328,7 +328,7 @@ async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   }
   highlightLines(fileDiffElement, lineElement => {
     const location = getDiffLineLocation(lineElement, fileDiffElement);
-    return (location && sections[location.side]?.[location.lineNumber - 1]) || fileLanguage;
+    return (location && lineLanguages[location.side]?.[location.lineNumber - 1]) || fileLanguage;
   });
 }
 

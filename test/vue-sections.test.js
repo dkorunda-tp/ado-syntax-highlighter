@@ -7,12 +7,12 @@ test.before(async () => {
   ({ window } = await loadExtension());
 });
 
-function sections(lines) {
-  return Array.from(window.parseVueSections(lines.join('\n')));
+function lineLanguages(lines) {
+  return Array.from(window.parseVueLineLanguages(lines.join('\n')));
 }
 
 test('script setup lang ts, template and scoped scss style', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<template>',
     '  <div class="a">{{ msg }}</div>',
     '</template>',
@@ -30,7 +30,7 @@ test('script setup lang ts, template and scoped scss style', () => {
 });
 
 test('nested template tags close the block only at depth zero', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<template>',
     '  <template v-if="ready">',
     '    <p>ready</p>',
@@ -50,12 +50,12 @@ test('nested template tags close the block only at depth zero', () => {
 });
 
 test('a byte order mark before the first block does not hide it', () => {
-  assert.deepEqual(Array.from(window.parseVueSections('﻿<script setup lang="ts">\nconst a = 1\n</script>')),
+  assert.deepEqual(Array.from(window.parseVueLineLanguages('\uFEFF<script setup lang="ts">\nconst a = 1\n</script>')),
     ['markup', 'typescript', 'markup']);
 });
 
 test('block tags inside a root-level HTML comment do not open a block', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<!--',
     '<script>',
     'old code',
@@ -75,7 +75,7 @@ test('block tags inside a root-level HTML comment do not open a block', () => {
 });
 
 test('template tags inside HTML comments do not change the template depth', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<template>',
     '  <!-- <template v-if="old"> -->',
     '  <div />',
@@ -94,7 +94,7 @@ test('template tags inside HTML comments do not change the template depth', () =
 });
 
 test('a column-0 script tag inside a template does not open a block', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<template>',
     '<script>',
     'not code',
@@ -103,7 +103,7 @@ test('a column-0 script tag inside a template does not open a block', () => {
 });
 
 test('a plain style, a scoped style and a non-scss lang are css', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<style>',
     '.a { color: red; }',
     '</style>',
@@ -121,11 +121,11 @@ test('a plain style, a scoped style and a non-scss lang are css', () => {
 });
 
 test("single-quoted lang='scss' is scss", () => {
-  assert.deepEqual(sections(["<style lang='scss'>", '$a: 1px;', '</style>']), ['markup', 'scss', 'markup']);
+  assert.deepEqual(lineLanguages(["<style lang='scss'>", '$a: 1px;', '</style>']), ['markup', 'scss', 'markup']);
 });
 
 test('only a lang attribute with the exact value scss is scss', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<style lang=scss>',
     '$a: 1px;',
     '</style>',
@@ -143,7 +143,7 @@ test('only a lang attribute with the exact value scss is scss', () => {
 });
 
 test('script without lang, and with lang="js", is typescript', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<script>',
     'const a = 1',
     '</script>',
@@ -156,15 +156,15 @@ test('script without lang, and with lang="js", is typescript', () => {
 test('CRLF text gives the same map as LF text', () => {
   const lines = ['<template>', '  <div />', '</template>', '<script setup lang="ts">', 'const a = 1', '</script>'];
   assert.deepEqual(
-    Array.from(window.parseVueSections(lines.join('\r\n'))),
-    sections(lines)
+    Array.from(window.parseVueLineLanguages(lines.join('\r\n'))),
+    lineLanguages(lines)
   );
-  assert.deepEqual(Array.from(window.parseVueSections(lines.join('\r\n'))),
+  assert.deepEqual(Array.from(window.parseVueLineLanguages(lines.join('\r\n'))),
     ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
 });
 
 test('lines between and around blocks are markup', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<!-- header comment -->',
     '<script setup lang="ts">',
     'const a = 1',
@@ -186,7 +186,7 @@ test('lines between and around blocks are markup', () => {
 });
 
 test('a one-line block is markup and closes on the same line', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<style>.a { color: red; }</style>',
     '.not-style {}',
     '<template><div /></template>',
@@ -197,7 +197,7 @@ test('a one-line block is markup and closes on the same line', () => {
 });
 
 test('an opening tag with attributes over several lines', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<script',
     '  setup',
     '  lang="ts"',
@@ -217,7 +217,7 @@ test('an opening tag with attributes over several lines', () => {
 });
 
 test('a > inside a quoted attribute of a multi-line opening tag does not end the tag', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '<style',
     '  data-note="first',
     '> second"',
@@ -238,7 +238,7 @@ test('a > inside a quoted attribute of a multi-line opening tag does not end the
 });
 
 test('an indented or longer tag name does not open a block', () => {
-  assert.deepEqual(sections([
+  assert.deepEqual(lineLanguages([
     '  <script>',
     'a',
     '<scripts>',
@@ -248,6 +248,6 @@ test('an indented or longer tag name does not open a block', () => {
 });
 
 test('an unclosed script block runs to the end of the file', () => {
-  assert.deepEqual(sections(['<script setup lang="ts">', 'const a = 1', 'const b = 2']),
+  assert.deepEqual(lineLanguages(['<script setup lang="ts">', 'const a = 1', 'const b = 2']),
     ['markup', 'typescript', 'typescript']);
 });

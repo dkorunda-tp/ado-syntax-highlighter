@@ -246,7 +246,7 @@ test('a sign-in HTML page with status 200 for the file falls back', async () => 
   assert.deepEqual(languages(highlightCalls), INLINE_ROWS.map(() => 'vue'));
 });
 
-test('a missing old file (renamed path) falls back for old-side lines only', async () => {
+test('a missing old file falls back for old-side lines only', async () => {
   const server = standardServer({ files: { [`src2:${PATH}`]: NEW_TEXT } });
   const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
   await window.processFileDiff(mount(window, inlineCard()));
