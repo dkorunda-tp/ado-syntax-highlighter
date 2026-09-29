@@ -131,6 +131,16 @@ test('a v-slot value is TypeScript, a #slot without a value is an attribute name
   assert.deepEqual(texts(contents[5], '.token.typescript'), []);
 });
 
+test('a #slot shorthand with a value is TypeScript', async () => {
+  const { window } = await loadExtension();
+  const content = window.document.createElement('div');
+  content.innerHTML = perRow(window, '<template #item="{ item, index }">', 'vue-template');
+
+  assert.deepEqual(texts(content, '.token.attr-name'), ['#item']);
+  assert.deepEqual(texts(content, '.token.special-attr > .token.typescript'), ['{ item, index }']);
+  assert.deepEqual(texts(content, '.token.special-attr .token.typescript .token.punctuation'), ['{', ',', '}']);
+});
+
 test('a multi-line :class object is TypeScript on every row', async () => {
   const { contents } = await addedFile();
 

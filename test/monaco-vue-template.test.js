@@ -138,7 +138,8 @@ test('vue template expressions', async t => {
       '  <List v-slot="{ item }">',
       '    <template #label>{{ item }}</template>',
       '    <template v-slot:row="{ row }"><b>{{ row }}</b></template>',
-      '  </List>'
+      '  </List>',
+      '  <Table #cell="{ value }"></Table>'
     ]);
 
     assert.equal(typeOf(lines[0], 'v-slot'), 'attribute.name.vue');
@@ -152,6 +153,9 @@ test('vue template expressions', async t => {
     assert.equal(typeOf(lines[2], 'row', 'v-slot:row'), 'identifier.ts');
     assert.equal(typeOf(lines[2], 'b'), 'tag.vue');
     assert.equal(typeOf(lines[3], 'List'), 'tag.vue');
+    assert.equal(typeOf(lines[4], '#cell'), 'attribute.name.vue');
+    assert.equal(typeOf(lines[4], 'value'), 'identifier.ts');
+    assert.equal(typeOf(lines[4], 'Table', '}'), 'tag.vue');
   });
 
   await t.test('a directive with no value leaves the next attribute alone', () => {
