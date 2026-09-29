@@ -121,19 +121,23 @@ function fileCard({ filePath, diff, encoding, renamedFrom }) {
     `</div>`;
 }
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
+// Holds every request until `open()` runs, so a test can act while a fetch is in flight.
+function gatedFetch(fetch) {
+  let open;
+  const gate = new Promise(resolve => {
+    open = resolve;
   });
-  return { promise, resolve, reject };
+  return {
+    fetch: async (url, options) => {
+      await gate;
+      return fetch(url, options);
+    },
+    open
+  };
 }
 
 function response({ status = 200, contentType, body }) {
   return {
-    ok: status >= 200 && status < 300,
     status,
     headers: { get: name => (name.toLowerCase() === 'content-type' ? contentType : null) },
     json: async () => JSON.parse(body),
@@ -153,7 +157,6 @@ function iteration(id, source, common) {
   return {
     id,
     sourceRefCommit: { commitId: source },
-    targetRefCommit: { commitId: `target${id}` },
     commonRefCommit: { commitId: common }
   };
 }
@@ -187,13 +190,11 @@ module.exports = {
   loadExtension,
   mount,
   inlineRow,
-  paneRow,
   singleColumnRow,
   sideBySide,
   fileCard,
-  deferred,
+  gatedFetch,
   jsonResponse,
-  textResponse,
   iteration,
   createAdoServer,
   highlightedClones

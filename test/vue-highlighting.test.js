@@ -8,7 +8,7 @@ const {
   inlineRow,
   singleColumnRow,
   sideBySide,
-  deferred,
+  gatedFetch,
   jsonResponse,
   iteration,
   createAdoServer,
@@ -234,7 +234,6 @@ test('a sign-in HTML page with status 200 for the file falls back', async () => 
   const fetch = async (url, options) => {
     if (!url.includes('/items?')) return server.fetch(url, options);
     return {
-      ok: true,
       status: 200,
       headers: { get: () => 'text/html; charset=utf-8' },
       text: async () => '<html>sign in</html>'
@@ -270,18 +269,14 @@ test('a row without a line number falls back', async () => {
 
 test('a file is not processed twice while its fetch is in flight', async () => {
   const server = standardServer();
-  const gate = deferred();
-  const fetch = async (url, options) => {
-    await gate.promise;
-    return server.fetch(url, options);
-  };
-  const { window, highlightCalls } = await loadExtension({ fetch });
+  const gated = gatedFetch(server.fetch);
+  const { window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
   const file = mount(window, inlineCard());
 
   const first = window.processFileDiff(file);
   const second = window.processFileDiff(file);
   window.applySyntaxHighlighting();
-  gate.resolve();
+  gated.open();
   await first;
   await second;
 
@@ -292,18 +287,15 @@ test('a file is not processed twice while its fetch is in flight', async () => {
 
 test('a response that lands after navigation to another PR is dropped, and the card is processed for the new PR', async () => {
   const server = standardServer();
-  const gate = deferred();
-  const fetch = async (url, options) => {
-    await gate.promise;
-    if (url.includes('/pullRequests/43/')) return jsonResponse({ message: 'not found' }, 404);
-    return server.fetch(url, options);
-  };
-  const { dom, window, highlightCalls } = await loadExtension({ fetch });
+  const gated = gatedFetch((url, options) => (url.includes('/pullRequests/43/')
+    ? jsonResponse({ message: 'not found' }, 404)
+    : server.fetch(url, options)));
+  const { dom, window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
   const file = mount(window, inlineCard());
 
   const pending = window.processFileDiff(file);
   dom.reconfigure({ url: 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/43?_a=files' });
-  gate.resolve();
+  gated.open();
   await pending;
 
   // PR 43 has no iterations here, so the file falls back; the map fetched for PR 42 is never used.
@@ -321,18 +313,14 @@ test('a card that a pass skipped while its fetch was in flight is processed for 
       [`src1:${PATH}`]: src1Text
     }
   });
-  const gate = deferred();
-  const fetch = async (url, options) => {
-    await gate.promise;
-    return server.fetch(url, options);
-  };
-  const { dom, window, highlightCalls } = await loadExtension({ fetch });
+  const gated = gatedFetch(server.fetch);
+  const { dom, window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
   const file = mount(window, inlineCard());
 
   const pending = window.processFileDiff(file);
   dom.reconfigure({ url: `${PR_URL}&iteration=2&base=1` });
   window.applySyntaxHighlighting();
-  gate.resolve();
+  gated.open();
   await pending;
 
   assert.deepEqual(languages(highlightCalls),
@@ -368,18 +356,14 @@ test('a card without the file path element falls back and fetches nothing', asyn
 
 test('a card that shows another file when its fetch lands does not get the old file map', async () => {
   const server = standardServer();
-  const gate = deferred();
-  const fetch = async (url, options) => {
-    await gate.promise;
-    return server.fetch(url, options);
-  };
-  const { window, highlightCalls } = await loadExtension({ fetch });
+  const gated = gatedFetch(server.fetch);
+  const { window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
   const file = mount(window, inlineCard());
 
   const pending = window.processFileDiff(file);
   file.querySelector('.text-ellipsis').textContent = 'Other.vue';
   file.querySelector('.body-s.secondary-text.text-ellipsis').textContent = '/src/Other.vue';
-  gate.resolve();
+  gated.open();
   await pending;
 
   // The server has no /src/Other.vue, so every line falls back instead of using the TopActionBar.vue map.
@@ -389,17 +373,13 @@ test('a card that shows another file when its fetch lands does not get the old f
 
 test('a file removed from the page while its fetch is in flight is left alone', async () => {
   const server = standardServer();
-  const gate = deferred();
-  const fetch = async (url, options) => {
-    await gate.promise;
-    return server.fetch(url, options);
-  };
-  const { window, highlightCalls } = await loadExtension({ fetch });
+  const gated = gatedFetch(server.fetch);
+  const { window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
   const file = mount(window, inlineCard());
 
   const pending = window.processFileDiff(file);
   file.remove();
-  gate.resolve();
+  gated.open();
   await pending;
 
   assert.equal(highlightCalls.length, 0);
