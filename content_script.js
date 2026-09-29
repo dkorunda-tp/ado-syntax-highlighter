@@ -141,6 +141,10 @@ function findTagEnd(text, state) {
   return -1;
 }
 
+function splitFileLines(text) {
+  return text.replace(/^﻿/, '').split(/\r?\n/);
+}
+
 // Returns one Prism language per line; index 0 is line 1.
 function parseVueLineLanguages(text) {
   const languages = [];
@@ -166,7 +170,7 @@ function parseVueLineLanguages(text) {
     return after.includes(`</${block.name}`) ? null : block;
   };
 
-  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+  for (const line of splitFileLines(text)) {
     if (!block) {
       languages.push('markup');
       const match = !rootComment.inComment && line.match(vueBlockOpenPattern);
@@ -215,13 +219,13 @@ function splitTokensIntoLines(stream) {
 // once, so tags, comments and strings that span lines keep their tokens on every line.
 function parseVueFileLines(text) {
   const languages = parseVueLineLanguages(text);
-  const lines = (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).split(/\r?\n/);
+  const lines = splitFileLines(text);
   const fileLines = [];
   for (let start = 0; start < lines.length;) {
     const language = languages[start];
     let end = start + 1;
     while (end < lines.length && languages[end] === language) end++;
-    // The same hooks as Prism.highlight, so embedded languages such as tagged template strings match per-row output.
+    // Runs the hooks that Prism.highlight runs, so plugins such as js-templates tokenize embedded languages here too.
     const env = { code: lines.slice(start, end).join('\n'), grammar: Prism.languages[language], language };
     Prism.hooks.run('before-tokenize', env);
     env.tokens = Prism.tokenize(env.code, env.grammar);
@@ -234,22 +238,21 @@ function parseVueFileLines(text) {
   return fileLines;
 }
 
-// The file line of the row that Prism highlights now. The row gets that line's tokens when its text is the file line.
-let highlightedFileLine = null;
+// Prism hooks get no row, so the file line of the row in highlight is held here for the after-tokenize hook.
+let rowFileLine = null;
 const foldNonBreakingSpaces = text => text.replace(/\xa0/g, ' ');
 
-// Runs `highlight` with `fileLine` as the line of the row, and clears it also when `highlight` throws.
-function withHighlightedFileLine(fileLine, highlight) {
-  highlightedFileLine = fileLine;
+function withRowFileLine(fileLine, highlight) {
+  rowFileLine = fileLine;
   try {
     highlight();
   } finally {
-    highlightedFileLine = null;
+    rowFileLine = null;
   }
 }
 
 Prism.hooks.add('after-tokenize', env => {
-  const line = highlightedFileLine;
+  const line = rowFileLine;
   if (line && env.language === line.language && foldNonBreakingSpaces(env.code) === foldNonBreakingSpaces(line.text)) {
     env.tokens = line.tokens;
   }
@@ -437,7 +440,7 @@ function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => nu
       const code = document.createElement('code'); // Temporary element
       code.className = `language-${language}`;
       code.innerHTML = codeToHighlight;
-      withHighlightedFileLine(getFileLine(originalLineElement), () => Prism.highlightElement(code, false, () => {
+      withRowFileLine(getFileLine(originalLineElement), () => Prism.highlightElement(code, false, () => {
         const contentDiv = document.createElement('div');
         contentDiv.innerHTML = code.innerHTML;
         contentDiv.classList.add(getTheme(originalLineElement));
