@@ -15,6 +15,17 @@ function readBridge() {
   return fs.readFileSync(path.join(root, 'monaco_bridge.js'), 'utf8');
 }
 
+// ADO's single-file view: `.repos-changes-viewer > .vss-base-editor.<editorClass> > ...`. Returns the host.
+function createViewerHost(document, editorClass) {
+  const viewer = document.createElement('div');
+  viewer.className = 'repos-changes-viewer';
+  const host = document.createElement('div');
+  host.className = `vss-base-editor ${editorClass}`;
+  viewer.appendChild(host);
+  document.body.appendChild(viewer);
+  return host;
+}
+
 function createEmitter() {
   const listeners = [];
   const event = listener => {
@@ -123,17 +134,6 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     return editor;
   }
 
-  // ADO's single-file view: `.repos-changes-viewer > .vss-base-editor.<editorClass> > ...`.
-  function createViewerHost(document, editorClass) {
-    const viewer = document.createElement('div');
-    viewer.className = 'repos-changes-viewer';
-    const host = document.createElement('div');
-    host.className = `vss-base-editor ${editorClass}`;
-    viewer.appendChild(host);
-    document.body.appendChild(viewer);
-    return host;
-  }
-
   // A changed file: two inner editors inside `.monaco-diff-editor`, as Monaco builds it.
   function createDiffEditor(document) {
     const element = document.createElement('div');
@@ -147,7 +147,6 @@ function createFakeMonaco({ languages = ['plaintext', 'typescript', 'css', 'scss
     const original = createEditor(originalNode);
     const modified = createEditor(modifiedNode);
     return {
-      element,
       original,
       modified,
       setModel(pair) {
@@ -239,17 +238,18 @@ async function loadRealMonaco({ url = SINGLE_FILE_URL, bridge = 'before' } = {})
     dom,
     window,
     monaco: window.monaco,
-    errors,
     startBridge: () => window.eval(readBridge()),
     sendTheme: payload => window.document.dispatchEvent(new window.CustomEvent(THEME_EVENT, { detail: JSON.stringify(payload) })),
     close: () => window.close()
   };
 }
 
-async function waitFor(check, what, errors = [], timeout = 5000) {
+const WAIT_TIMEOUT_MS = 5000;
+
+async function waitFor(check, what, errors = []) {
   const start = Date.now();
   while (!check()) {
-    if (Date.now() - start > timeout) {
+    if (Date.now() - start > WAIT_TIMEOUT_MS) {
       throw new Error(`Timed out waiting for ${what}. Page errors: ${errors.join(' | ')}`);
     }
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -262,6 +262,7 @@ module.exports = {
   VUE_PATH,
   SINGLE_FILE_URL,
   readBridge,
+  createViewerHost,
   createFakeMonaco,
   loadBridge,
   vueLanguageCalls,

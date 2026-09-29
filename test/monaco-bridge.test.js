@@ -1,7 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const { SINGLE_FILE_URL, createFakeMonaco, loadBridge, vueLanguageCalls } = require('./monaco-helpers');
 
 const LIGHT = {
@@ -13,11 +11,7 @@ const DARK = {
   comment: { foreground: '#999999', fontStyle: '' },
   keyword: { foreground: '#cc99cd', fontStyle: 'bold' }
 };
-const PRISM_TYPES = [
-  'comment', 'keyword', 'boolean', 'string', 'property', 'number', 'regex', 'class-name', 'tag', 'selector', 'attr-name',
-  'attr-value', 'punctuation', 'operator', 'atrule', 'variable', 'constant', 'namespace', 'doctype', 'function'
-];
-const TS_URL ='https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=files&path=%2Fsrc%2Futil.ts';
+const TS_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=files&path=%2Fsrc%2Futil.ts';
 
 // Opens the single-file view the way ADO does: a diff editor, a model per side, then setModel.
 function openVueDiff(fake, document) {
@@ -199,7 +193,7 @@ test('an older model that an existing editor starts to show switches to vue', as
   assert.equal(modified.language, 'vue');
 });
 
-test('ADO setting a vue model back to plaintext gets it re-applied, but only three times', async () => {
+test('ADO setting a vue model back to plaintext gets vue again, but at most three applies in all', async () => {
   const page = loadBridge();
   page.assignMonaco();
   page.fake.monaco.editor.onDidChangeModelLanguage(({ model }) => {
@@ -393,7 +387,7 @@ test('theme: vs and vs-dark are redefined on their own base with inherit', () =>
 
 // ADO's Monaco does not redraw the active theme after defineTheme, so the bridge sets it again by the same name.
 for (const activeTheme of ['vs', 'vs-dark', 'hc-black']) {
-  test(`theme: after the redefinition, the active ${activeTheme} theme is set again`, () => {
+  test(`theme: after vs and vs-dark are redefined, the active ${activeTheme} theme is set again`, () => {
     const page = loadBridge({ fake: createFakeMonaco({ activeTheme }) });
     page.assignMonaco();
     openVueDiff(page.fake, page.window.document);
@@ -493,33 +487,6 @@ test('theme: a Prism type also overrides the more specific built-in rules it wou
   assert.deepEqual(delimiterTokens.sort(), ['annotation', 'delimiter', 'delimiter.html', 'delimiter.xml']);
 });
 
-// Every token color rule of Monaco 0.29.1's built-in vs and vs-dark themes, read from the bundle.
-function builtInRuleTokens() {
-  const bundle = fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'monaco-editor', 'min', 'vs', 'editor', 'editor.main.js'), 'utf8');
-  const tokens = new Set();
-  for (const base of ['vs', 'vs-dark']) {
-    const rules = bundle.match(new RegExp(`base:"${base}",inherit:!1,rules:\\[([^\\]]*)\\]`))[1];
-    for (const [, token] of rules.matchAll(/token:"([^"]*)"/g)) tokens.add(token);
-  }
-  return tokens;
-}
-
-// A built-in rule that no Prism rule replaces keeps its built-in color. These are left on purpose: `invalid` is
-// the TypeScript and JavaScript default token and has no Prism type, `emphasis`, `strong` and `metatag.php` set
-// only a font style, the pug id and class rules match Prism types the probe does not read, and no 0.29.1 grammar
-// emits `meta.tag`.
-const UNMAPPED_BUILT_IN_RULES = ['', 'invalid', 'emphasis', 'strong', 'metatag.php', 'tag.id.pug', 'tag.class.pug', 'meta.tag'];
-
-test('theme: every built-in color rule is replaced by a Prism rule, apart from the listed ones', () => {
-  const page = loadBridge();
-  page.assignMonaco();
-  const allTypes = Object.fromEntries(PRISM_TYPES.map(type => [type, { foreground: '#123456', fontStyle: '' }]));
-  page.sendTheme({ vs: allTypes });
-
-  const mapped = new Set(themeFor(page.fake, 'vs').rules.map(rule => rule.token));
-  const unmapped = [...builtInRuleTokens()].filter(token => !mapped.has(token));
-  assert.deepEqual(unmapped.sort(), [...UNMAPPED_BUILT_IN_RULES].sort());
-});
 
 test('theme: scss function calls and sql built-ins take the Prism function color, annotations the punctuation color', () => {
   const page = loadBridge();

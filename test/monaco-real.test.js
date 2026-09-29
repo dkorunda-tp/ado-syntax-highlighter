@@ -1,7 +1,7 @@
 // Runs monaco_bridge.js against the real monaco-editor 0.29 build, the API range ADO ships.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { VUE_PATH, loadRealMonaco, waitFor } = require('./monaco-helpers');
+const { VUE_PATH, createViewerHost, loadRealMonaco, waitFor } = require('./monaco-helpers');
 
 // The tokens of one line with their text. Monaco merges neighbors of the same type, so a quoted value is one token.
 function lineTokens(tokens, line) {
@@ -193,21 +193,10 @@ test('grammar', async t => {
   });
 });
 
-// ADO puts the single-file view's editor in `.repos-changes-viewer > .vss-base-editor.<editorClass>`.
-function viewerHost(document, editorClass) {
-  const viewer = document.createElement('div');
-  viewer.className = 'repos-changes-viewer';
-  const host = document.createElement('div');
-  host.className = `vss-base-editor ${editorClass}`;
-  viewer.appendChild(host);
-  document.body.appendChild(viewer);
-  return host;
-}
-
 // The single-file view of a changed file: ADO creates a diff editor and gives it a model per side. The original
 // model has no URI, so Monaco names it "inmemory://model/N".
 function openDiff(monaco, document, fileName) {
-  const diffEditor = monaco.editor.createDiffEditor(viewerHost(document, 'repos-diff-editor'), {});
+  const diffEditor = monaco.editor.createDiffEditor(createViewerHost(document, 'repos-diff-editor'), {});
   const original = monaco.editor.createModel('<template>\n  <div />\n</template>\n');
   const modified = monaco.editor.createModel('<template>\n  <p />\n</template>\n', undefined, monaco.Uri.parse(`inmemory://model${fileName}`));
   diffEditor.setModel({ original, modified });
@@ -248,7 +237,7 @@ test('an added .vue file in a plain editor of the single-file view switches to v
   t.after(() => page.close());
   const { monaco, window } = page;
 
-  const fileEditor = monaco.editor.create(viewerHost(window.document, 'repos-file-editor'), {
+  const fileEditor = monaco.editor.create(createViewerHost(window.document, 'repos-file-editor'), {
     model: monaco.editor.createModel('<template>\n  <p />\n</template>\n', undefined, monaco.Uri.parse(`inmemory://model${VUE_PATH}`))
   });
   const widgetHost = window.document.createElement('div');

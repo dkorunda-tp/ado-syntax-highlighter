@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { loadExtension, mount, fileCard, inlineRow } = require('./helpers');
 const { loadBridge, readBridge, createFakeMonaco } = require('./monaco-helpers');
 
@@ -180,4 +182,33 @@ test('every Prism token type the content script sends is one the bridge accepts'
   assert.ok(Object.keys(payload.vs).length > 10);
   assert.ok(payload.vs.function, 'the function color is sent, for scss function calls and sql built-ins');
   assert.equal(page.fake.calls.defineTheme.length, 2);
+});
+
+// Every token color rule of Monaco 0.29.1's built-in vs and vs-dark themes, read from the bundle.
+function builtInRuleTokens() {
+  const bundle = fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'monaco-editor', 'min', 'vs', 'editor', 'editor.main.js'), 'utf8');
+  const tokens = new Set();
+  for (const base of ['vs', 'vs-dark']) {
+    const rules = bundle.match(new RegExp(`base:"${base}",inherit:!1,rules:\\[([^\\]]*)\\]`))[1];
+    for (const [, token] of rules.matchAll(/token:"([^"]*)"/g)) tokens.add(token);
+  }
+  return tokens;
+}
+
+// A built-in rule that no Prism rule replaces keeps its built-in color. These are left on purpose: `invalid` is
+// the TypeScript and JavaScript default token and has no Prism type, `emphasis`, `strong` and `metatag.php` set
+// only a font style, the pug id and class rules match Prism types the probe does not read, and no 0.29.1 grammar
+// emits `meta.tag`.
+const UNMAPPED_BUILT_IN_RULES = ['', 'invalid', 'emphasis', 'strong', 'metatag.php', 'tag.id.pug', 'tag.class.pug', 'meta.tag'];
+
+test('the colors the content script sends replace every built-in color rule, apart from the listed ones', async () => {
+  const { themeEvents } = await loadExtension({ css: '.prism-one-light .token { color: #123456; }' });
+  const page = loadBridge();
+  page.assignMonaco();
+  page.sendTheme(themeEvents[0]);
+
+  const vs = page.fake.calls.defineTheme.find(call => call.themeName === 'vs');
+  const mapped = new Set(vs.themeData.rules.map(rule => rule.token));
+  const unmapped = [...builtInRuleTokens()].filter(token => !mapped.has(token));
+  assert.deepEqual(unmapped.sort(), [...UNMAPPED_BUILT_IN_RULES].sort());
 });

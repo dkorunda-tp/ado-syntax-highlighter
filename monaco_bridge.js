@@ -12,7 +12,7 @@
   const THEME_NAMES = ['vs', 'vs-dark'];
   const ACTIVE_THEME_NAMES = ['vs', 'vs-dark', 'hc-black'];
   const FONT_STYLES = ['', 'italic', 'bold', 'italic bold'];
-  // ADO can reset a model's language; after this many re-applies ADO keeps it.
+  // ADO can reset a model's language. The bridge sets vue at most this many times per model, then ADO keeps its choice.
   const MAX_LANGUAGE_APPLIES = 3;
 
   // Prism token type -> Monaco token types. A theme rule matches by the longest token prefix, so the more
