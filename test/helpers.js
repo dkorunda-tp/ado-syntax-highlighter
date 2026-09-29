@@ -10,9 +10,11 @@ const PR_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=fi
 
 // Loads Prism and the content script into a jsdom window. The MutationObserver is stubbed
 // so that tests call processFileDiff themselves and control the timing.
-async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {} } = {}) {
+// `css` stands in for the injected Prism theme styles. `themeEvents` collects the parsed details sent to the
+// Monaco bridge, and `changeStorage` fires a storage change as the options page would.
+async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {}, themePreference = 'prism-one-light', css = '' } = {}) {
   const virtualConsole = new VirtualConsole();
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+  const dom = new JSDOM(`<!doctype html><html><head><style>${css}</style></head><body></body></html>`, {
     url,
     runScripts: 'outside-only',
     virtualConsole
@@ -22,13 +24,20 @@ async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {} } = 
     observe() {}
     disconnect() {}
   };
+  const storageListeners = [];
   window.browser = {
-    storage: { sync: { get: async () => ({ themePreference: 'prism-one-light', customFilePatterns }) } }
+    storage: {
+      sync: { get: async () => ({ themePreference, customFilePatterns }) },
+      onChanged: { addListener: listener => storageListeners.push(listener) }
+    }
   };
+  const themeEvents = [];
+  window.document.addEventListener('ado-syntax-highlighter:monaco-theme', event => themeEvents.push(JSON.parse(event.detail)));
   window.fetch = fetch || (() => Promise.reject(new Error('unexpected fetch')));
   window.eval(prismSource);
   window.eval(contentScriptSource);
   await new Promise(resolve => window.setTimeout(resolve, 0));
+  const changeStorage = (changes, areaName = 'sync') => storageListeners.forEach(listener => listener(changes, areaName));
 
   const highlightCalls = [];
   const originalHighlight = window.Prism.highlightElement;
@@ -40,7 +49,7 @@ async function loadExtension({ url = PR_URL, fetch, customFilePatterns = {} } = 
     return originalHighlight.call(this, element, async, callback);
   };
 
-  return { dom, window, highlightCalls };
+  return { dom, window, highlightCalls, themeEvents, changeStorage };
 }
 
 function mount(window, html) {

@@ -9,6 +9,7 @@ FIREFOX_ZIP := $(DIST_DIR)/firefox-extension.zip
 COMMON_FILES := \
 	background.js \
 	content_script.js \
+	monaco_bridge.js \
 	custom_styles.css \
 	options.html \
 	options.js \

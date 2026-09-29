@@ -11,6 +11,13 @@ function injectContent(tabId) {
     files: ["prism/prism.css", "custom_styles.css"],
   }).catch(err => console.warn(`CSS injection warning: ${err.message}`));
 
+  // The page is already loaded here, so the bridge takes the Monaco instance that exists, if any.
+  browser.scripting.executeScript({
+    target: { tabId: tabId },
+    files: ["monaco_bridge.js"],
+    world: "MAIN",
+  }).catch(err => console.warn(`Monaco bridge injection warning: ${err.message}`));
+
   browser.scripting.executeScript({
     target: { tabId: tabId },
     files: ["browser-polyfill.min.js", "prism/prism.min.js", "content_script.js"],

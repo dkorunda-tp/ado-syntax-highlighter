@@ -398,6 +398,67 @@ function highlightLines(fileDiffElement, getLineLanguage) {
   });
 }
 
+// The single-file view is a Monaco diff editor, colored by monaco_bridge.js in the page's main world. That
+// script cannot read extension storage, so the token colors of the chosen Prism theme are sent to it, one set
+// per Monaco base theme. With auto, vs gets the light Prism theme and vs-dark the dark one.
+const MONACO_THEME_EVENT = 'ado-syntax-highlighter:monaco-theme';
+const MONACO_THEME_REQUEST_EVENT = 'ado-syntax-highlighter:monaco-theme-request';
+const monacoPrismTokenTypes = [
+  'comment', 'keyword', 'boolean', 'string', 'property', 'number', 'regex', 'class-name', 'tag', 'selector',
+  'attr-name', 'attr-value', 'punctuation', 'operator', 'atrule', 'variable', 'constant', 'namespace', 'doctype'
+];
+let monacoThemePreference = null;
+
+function toHexColor(cssColor) {
+  const rgb = cssColor.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)\s*(?:[,/]\s*([\d.]+)\s*)?\)$/);
+  if (!rgb || (rgb[4] !== undefined && Number(rgb[4]) === 0)) return null;
+  return `#${rgb.slice(1, 4).map(value => Number(value).toString(16).padStart(2, '0')).join('')}`;
+}
+
+// Reads the theme's token styles from the same markup the multi-file view renders: token spans inside an
+// element with the theme class. A token that shows the probe's own color has no rule and is left out.
+function getPrismTokenStyles(themeName) {
+  const probe = document.createElement('div');
+  probe.className = themeName;
+  probe.style.cssText = 'position: absolute; visibility: hidden; pointer-events: none; color: rgb(1, 2, 3); font-style: normal; font-weight: 400;';
+  for (const type of monacoPrismTokenTypes) {
+    const span = document.createElement('span');
+    span.className = `token ${type}`;
+    probe.appendChild(span);
+  }
+  document.body.appendChild(probe);
+  const unstyled = window.getComputedStyle(probe).color;
+  const styles = {};
+  [...probe.children].forEach((span, index) => {
+    const style = window.getComputedStyle(span);
+    const foreground = style.color !== unstyled && toHexColor(style.color);
+    if (!foreground) return;
+    const bold = style.fontWeight === 'bold' || Number(style.fontWeight) >= 600;
+    const fontStyle = [style.fontStyle === 'italic' && 'italic', bold && 'bold'].filter(Boolean).join(' ');
+    styles[monacoPrismTokenTypes[index]] = { foreground, fontStyle };
+  });
+  probe.remove();
+  return styles;
+}
+
+function sendMonacoTheme() {
+  if (!monacoThemePreference || !document.body) return;
+  const auto = monacoThemePreference === 'auto';
+  const detail = JSON.stringify({
+    vs: getPrismTokenStyles(auto ? 'prism-one-light' : monacoThemePreference),
+    'vs-dark': getPrismTokenStyles(auto ? 'prism-tomorrow-night' : monacoThemePreference)
+  });
+  document.dispatchEvent(new CustomEvent(MONACO_THEME_EVENT, { detail }));
+}
+
+document.addEventListener(MONACO_THEME_REQUEST_EVENT, sendMonacoTheme);
+
+browser.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'sync' || !changes.themePreference) return;
+  monacoThemePreference = changes.themePreference.newValue || 'auto';
+  sendMonacoTheme();
+});
+
 function applySyntaxHighlighting() {
   if (!window.location.href.includes('/_git/')) {
     return;
@@ -416,6 +477,8 @@ console.debug("ADO Syntax Highlighter: Content script loaded.");
 // Load custom patterns and then apply highlighting
 loadSettings().then(() => {
   applySyntaxHighlighting();
+  monacoThemePreference = themePreference;
+  sendMonacoTheme();
 });
 
 function debounce(func, wait) {

@@ -1,0 +1,117 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { loadExtension, mount, fileCard, inlineRow } = require('./helpers');
+const { loadBridge } = require('./monaco-helpers');
+
+// jsdom has no CSS nesting, so these flat rules stand in for the scoped prism.css that the build generates.
+const ONE_LIGHT = `
+  .prism-one-light .token.comment { color: #a0a1a7; font-style: italic; }
+  .prism-one-light .token.keyword { color: #a626a4; }
+  .prism-one-light .token.class-name { color: #c18401; font-weight: bold; }
+  .prism-one-light .token.punctuation { color: rgb(56, 58, 66); }
+`;
+const TOMORROW_NIGHT = `
+  .prism-tomorrow-night .token.comment { color: #999; }
+  .prism-tomorrow-night .token.keyword { color: #cc99cd; }
+`;
+const DRACULA = `
+  .prism-dracula .token.comment { color: slategray; }
+  .prism-dracula .token.string { color: rgba(0, 0, 0, 0); }
+`;
+
+const ONE_LIGHT_TOKENS = {
+  comment: { foreground: '#a0a1a7', fontStyle: 'italic' },
+  keyword: { foreground: '#a626a4', fontStyle: '' },
+  'class-name': { foreground: '#c18401', fontStyle: 'bold' },
+  punctuation: { foreground: '#383a42', fontStyle: '' }
+};
+const TOMORROW_NIGHT_TOKENS = {
+  comment: { foreground: '#999999', fontStyle: '' },
+  keyword: { foreground: '#cc99cd', fontStyle: '' }
+};
+
+test('the chosen Prism theme colors both Monaco bases, sent once on load', async () => {
+  const { themeEvents } = await loadExtension({ themePreference: 'prism-one-light', css: ONE_LIGHT });
+
+  assert.deepEqual(themeEvents, [{ vs: ONE_LIGHT_TOKENS, 'vs-dark': ONE_LIGHT_TOKENS }]);
+});
+
+test('auto gives vs the light Prism theme and vs-dark the dark one', async () => {
+  const { themeEvents } = await loadExtension({ themePreference: 'auto', css: ONE_LIGHT + TOMORROW_NIGHT });
+
+  assert.deepEqual(themeEvents, [{ vs: ONE_LIGHT_TOKENS, 'vs-dark': TOMORROW_NIGHT_TOKENS }]);
+});
+
+test('named colors become #rrggbb, and transparent or unstyled tokens are left out', async () => {
+  const { themeEvents } = await loadExtension({ themePreference: 'prism-dracula', css: DRACULA });
+
+  assert.deepEqual(themeEvents[0].vs, { comment: { foreground: '#708090', fontStyle: '' } });
+});
+
+test('the color probe is removed from the page', async () => {
+  const { window } = await loadExtension({ css: ONE_LIGHT });
+
+  assert.equal(window.document.body.children.length, 0);
+});
+
+test('a theme change in the options is sent again', async () => {
+  const { themeEvents, changeStorage } = await loadExtension({ css: ONE_LIGHT + DRACULA });
+
+  changeStorage({ themePreference: { oldValue: 'prism-one-light', newValue: 'prism-dracula' } });
+
+  assert.equal(themeEvents.length, 2);
+  assert.deepEqual(themeEvents[1].vs, { comment: { foreground: '#708090', fontStyle: '' } });
+});
+
+test('a theme reset to the default is sent as auto', async () => {
+  const { themeEvents, changeStorage } = await loadExtension({ css: ONE_LIGHT + TOMORROW_NIGHT });
+
+  changeStorage({ themePreference: { oldValue: 'prism-one-light' } });
+
+  assert.deepEqual(themeEvents[1], { vs: ONE_LIGHT_TOKENS, 'vs-dark': TOMORROW_NIGHT_TOKENS });
+});
+
+test('other storage changes send nothing', async () => {
+  const { themeEvents, changeStorage } = await loadExtension({ css: ONE_LIGHT });
+
+  changeStorage({ customFilePatterns: { newValue: {} } });
+  changeStorage({ themePreference: { newValue: 'prism-dracula' } }, 'local');
+
+  assert.equal(themeEvents.length, 1);
+});
+
+test('a theme request from the bridge gets the current theme', async () => {
+  const { window, themeEvents, changeStorage } = await loadExtension({ css: ONE_LIGHT + DRACULA });
+  changeStorage({ themePreference: { newValue: 'prism-dracula' } });
+
+  window.document.dispatchEvent(new window.CustomEvent('ado-syntax-highlighter:monaco-theme-request'));
+
+  assert.equal(themeEvents.length, 3);
+  assert.deepEqual(themeEvents[2], themeEvents[1]);
+});
+
+test('a theme change does not change the theme of the multi-file view', async () => {
+  const { window, changeStorage } = await loadExtension({ css: ONE_LIGHT });
+  changeStorage({ themePreference: { newValue: 'prism-dracula' } });
+
+  const file = mount(window, fileCard({
+    filePath: '/src/util.ts',
+    diff: inlineRow({ oldLine: 1, newLine: 1, type: 'unchanged', code: 'const a = 1' })
+  }));
+  window.processFileDiff(file);
+
+  assert.ok(file.querySelector('.ado-syntax-highlighted > .prism-one-light'));
+});
+
+test('every Prism token type the content script sends is one the bridge accepts', async () => {
+  // One rule for every token span makes the content script send each type it probes.
+  const { themeEvents } = await loadExtension({ css: '.prism-one-light .token { color: #123456; }' });
+  const [payload] = themeEvents;
+
+  const page = loadBridge();
+  page.assignMonaco();
+  page.sendTheme(payload);
+
+  assert.ok(Object.keys(payload.vs).length > 10);
+  assert.equal(page.fake.calls.defineTheme.length, 2);
+});
