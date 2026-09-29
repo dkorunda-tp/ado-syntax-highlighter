@@ -178,6 +178,21 @@ test('the diff editor moving to another file is judged by the new URL', async ()
   assert.equal(vue.modified.language, 'vue');
 });
 
+test('an older model that an existing editor starts to show switches to vue', async () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  const diff = page.fake.createDiffEditor(page.window.document);
+  const original = page.fake.createModel();
+  const modified = page.fake.createModel('/TopActionBar.vue');
+  await page.tick();
+  assert.equal(modified.language, 'plaintext');
+
+  diff.setModel({ original, modified });
+
+  assert.equal(original.language, 'vue');
+  assert.equal(modified.language, 'vue');
+});
+
 test('ADO setting a vue model back to plaintext gets it re-applied, but only three times', async () => {
   const page = loadBridge();
   page.assignMonaco();
@@ -238,6 +253,24 @@ test('late start: the model of an added file in the plain editor switches to vue
   });
 
   assert.equal(model.language, 'vue');
+});
+
+test('late start: a model that a known editor outside the view shows is left alone', async () => {
+  const page = loadBridge({
+    monacoFirst: true,
+    beforeBridge: ({ window, fake }) => {
+      fake.createDiffEditor(window.document);
+    }
+  });
+  const container = page.window.document.createElement('div');
+  page.window.document.body.appendChild(container);
+  const editor = page.fake.createEditor(container);
+
+  const model = page.fake.createModel('/TopActionBar.vue');
+  editor.setModel(model);
+  await page.tick();
+
+  assert.equal(model.language, 'plaintext');
 });
 
 test('late start without an editor in the changes viewer changes nothing', () => {
