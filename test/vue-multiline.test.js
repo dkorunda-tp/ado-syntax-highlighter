@@ -140,6 +140,89 @@ test('ADO spans in a row survive, and the row still gets the file tokens', async
   assert.equal(contents[1].textContent, '    :enable-time-picker="false"');
 });
 
+test('an ADO span that crosses a token boundary keeps its characters, and a span inside a comment row stays in the comment', async () => {
+  const { contents } = await highlight([
+    inlineRow({ oldLine: 3, type: 'removed', code: '', html: '    <span class="removed-content">v-model</span>="date"' }),
+    inlineRow({ newLine: 3, type: 'added', code: '', html: '    v-<span class="added-content">model="da</span>te"' })
+  ].join(''));
+
+  const removed = contents[0].querySelector('span.removed-content');
+  assert.equal(removed.textContent, 'v-model');
+  assert.ok(removed.closest('.token.comment'));
+
+  const added = contents[1].querySelector('span.added-content');
+  assert.equal(added.textContent, 'model="da');
+  assert.deepEqual(texts(added, '.token.attr-name'), ['model']);
+  assert.deepEqual(texts(added, '.token.attr-value .token.punctuation'), ['=', '"']);
+  assert.equal(contents[1].textContent, '    v-model="date"');
+});
+
+// A quoted attribute value, a comment with an empty middle line, and CSS and SCSS blocks, each over several lines.
+const MORE_LINES = [
+  '<template>',
+  '  <div',
+  '    class="a',
+  '      b"',
+  '  ></div>',
+  '  <!-- start',
+  '',
+  '    end -->',
+  '</template>',
+  '',
+  '<style lang="scss">',
+  '/* one',
+  '   two */',
+  '$gap: 4px;',
+  '</style>',
+  '',
+  '<style>',
+  '/* three',
+  '   four */',
+  '</style>'
+];
+
+function moreLinesFile() {
+  return highlight(
+    MORE_LINES.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join(''),
+    PATH,
+    { [`src2:${PATH}`]: MORE_LINES.join('\n') }
+  );
+}
+
+test('an attribute value over two rows is an attr-value with its quote punctuation on both rows', async () => {
+  const { contents } = await moreLinesFile();
+
+  assert.deepEqual(texts(contents[2], '.token.tag .token.attr-name'), ['class']);
+  assert.deepEqual(texts(contents[2], '.token.tag .token.attr-value'), ['="a']);
+  assert.deepEqual(texts(contents[2], '.token.attr-value .token.punctuation'), ['=', '"']);
+  assert.deepEqual(texts(contents[3], '.token.tag .token.attr-value'), ['      b"']);
+  assert.deepEqual(texts(contents[3], '.token.attr-value .token.punctuation'), ['"']);
+  assert.deepEqual(texts(contents[4], '.token.tag .token.punctuation'), ['>', '</', '>']);
+});
+
+test('a comment with an empty middle line keeps the rows after it on their own file lines', async () => {
+  const { window, contents } = await moreLinesFile();
+  const lines = window.parseVueFileLines(MORE_LINES.join('\n'));
+
+  assert.equal(lines[6].text, '');
+  assert.equal(lines[6].tokens.length, 0);
+  assert.deepEqual(texts(contents[5], '.token.comment'), ['<!-- start']);
+  assert.equal(contents[6].textContent, '');
+  assert.deepEqual(texts(contents[7], '.token.comment'), ['    end -->']);
+  assert.deepEqual(texts(contents[8], '.token.tag .token.tag'), ['</template']);
+});
+
+test('a multi-line comment in a scss or css style block is a comment on every row', async () => {
+  const { contents } = await moreLinesFile();
+
+  assert.deepEqual(texts(contents[11], '.token.comment'), ['/* one']);
+  assert.deepEqual(texts(contents[12], '.token.comment'), ['   two */']);
+  assert.deepEqual(texts(contents[13], '.token.variable'), ['$gap']);
+  assert.deepEqual(texts(contents[17], '.token.comment'), ['/* three']);
+  assert.deepEqual(texts(contents[18], '.token.comment'), ['   four */']);
+  contents.forEach((content, index) => assert.equal(content.textContent, MORE_LINES[index]));
+});
+
 test('a row whose text differs from its file line gets per-row highlighting', async () => {
   const { window, contents } = await highlight(
     inlineRow({ newLine: 3, type: 'added', code: '    v-model="other"' })
