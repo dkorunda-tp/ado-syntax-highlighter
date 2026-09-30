@@ -77,6 +77,12 @@ function recordAdoGrammarLoads(monaco) {
   return loaded;
 }
 
+// A model uses each language, as an open file does. A bridge that starts later registers a copy at once only for
+// a language that a model uses.
+function useLanguages(monaco) {
+  LANGUAGES.forEach(language => monaco.editor.createModel('', language));
+}
+
 function settle(window) {
   return new Promise(resolve => window.setTimeout(resolve, 50));
 }
@@ -195,6 +201,9 @@ const CSHARP_CALLS = [
   '[ProducesResponseType<List<CapModel>>(StatusCodes.Status200OK)]',
   '    [Authorize(Roles = "Admin"), Produces(typeof(Foo))]',
   '[Route("api/[controller]")]',
+  '[Authorize][HttpGet("{id}")]',
+  '[Foo(typeof(Bar), Name = nameof(Baz))]',
+  'public IActionResult Get([FromQuery(Name = "id")] int id, [FromRoute(Name = "x")] string x) => Ok(id);',
   'public record CapDto(int Id, string Name);',
   'public class CapsController(IMediator mediator) : ControllerBase',
   'base.Dispose(); this.Save(); x?.Foo(1); checked(x + 1); from(1); var q = from p in list where p.Ok() select p;',
@@ -225,6 +234,48 @@ test('a call has the function token where Prism shows a function', async t => {
       }
     });
     assert.deepEqual(mismatches, [], language);
+  }
+});
+
+// The multi-file view highlights a .vue script block as a whole, so Prism sees the `>(` of a generic call on a
+// later line. Monaco reads one line, so the Vue compiler macros, which are always calls, are calls before `<`.
+test('a Vue macro whose generic spans lines is a call, as in Prism\'s whole-block highlighting', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco } = page;
+  const Prism = loadPrism();
+  await waitForEmbeddedGrammars(monaco);
+  const script = [
+    'const props = defineProps<{',
+    '  items: Array<string>;',
+    '}>();',
+    'const emit = defineEmits<{',
+    '  (e: \'change\', id: number): void',
+    '}>();',
+    'const model = defineModel<',
+    '  string',
+    '>();',
+    'const options: Partial<{',
+    '  a: string',
+    '}> = {};'
+  ];
+  const lines = tokenizeLines(monaco, ['<script setup lang="ts">', ...script, '</script>']).slice(1);
+  const pieces = prismPieces(Prism, script.join('\n'), 'typescript');
+  let offset = 0;
+  const mismatches = [];
+  lines.forEach((tokens, index) => {
+    for (const token of tokens) {
+      if (WORD_TOKEN.test(token.type) && token.type.startsWith('function.') !== isPrismCall(pieces, offset)) {
+        mismatches.push(`${token.text} (${token.type}) in: ${script[index]}`);
+      }
+      offset += token.text.length;
+    }
+    offset++;
+  });
+
+  assert.deepEqual(mismatches, []);
+  for (const [index, name] of [[0, 'defineProps'], [3, 'defineEmits'], [6, 'defineModel']]) {
+    assert.equal(typeOf(lines[index], name), 'function.ts', name);
   }
 });
 
@@ -276,6 +327,18 @@ const total = caps.reduce((sum, cap) => sum + cap.amount, 0n) ?? 0x1f;
 /** JSDoc with a call(inside) */
 let x = a?.b?.(1) || await load<Cap>('x');`;
 
+// Attribute lines that could trap the copy in a state: deep parentheses, and an unclosed bracket in an
+// interpolation hole, whose closing brace must still end the hole.
+const CSHARP_EDGES = [
+  `[A(${'('.repeat(120)}1${')'.repeat(120)})]`,
+  'var s = $@"{',
+  '[x',
+  '}"; var n = Count(1);',
+  'var t = $"{',
+  '[y',
+  '}"; var m = Count(2);'
+];
+
 // A call as the copies find one: a name, then `(`, `<...>(` or `.call(` and the like.
 const CALL_FOLLOWS = /^\s*(?:<.*>\s*|\.\s*(?:apply|bind|call)\s*)?\(/;
 
@@ -287,7 +350,8 @@ test('every other token is the same as in Monaco\'s own grammar', async t => {
   const { monaco } = page;
   const scripts = ['monaco_bridge.js', 'content_script.js'].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   const scriptSample = [TYPESCRIPT_SAMPLE, ...SCRIPT_CALLS, scripts].join('\n');
-  const samples = { typescript: scriptSample, javascript: scriptSample, csharp: [CSHARP_SAMPLE, ...CSHARP_CALLS].join('\n') };
+  const samples = { typescript: scriptSample, javascript: scriptSample, csharp: [CSHARP_SAMPLE, ...CSHARP_CALLS, ...CSHARP_EDGES].join('\n') };
+  useLanguages(monaco);
   await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'Monaco\'s own grammars');
   const before = Object.fromEntries(LANGUAGES.map(language => [language, tokenize(monaco, samples[language], language)]));
 
@@ -366,6 +430,7 @@ test('a bridge that starts after the first use replaces ADO\'s loaded grammars',
   const page = await loadRealMonaco({ bridge: 'none' });
   t.after(() => page.close());
   const { monaco } = page;
+  useLanguages(monaco);
   await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'ADO\'s grammars');
   for (const language of LANGUAGES) assert.equal(hasCallTokens(monaco, language), false, language);
 
@@ -381,6 +446,8 @@ test('a bridge that starts after Monaco but before the first use replaces the gr
   const adoLoads = recordAdoGrammarLoads(monaco);
 
   page.startBridge();
+  await settle(window);
+  assert.deepEqual(adoLoads, [], 'the bridge loads no grammar that the page has not used');
   LANGUAGES.forEach(language => hasCallTokens(monaco, language));
   await waitFor(() => LANGUAGES.every(language => adoLoads.includes(language)), 'ADO\'s grammars');
   await settle(window);
@@ -388,10 +455,25 @@ test('a bridge that starts after Monaco but before the first use replaces the gr
   for (const language of LANGUAGES) assert.ok(hasCallTokens(monaco, language), language);
 });
 
+test('a colorize that rejects, as when ADO\'s grammar fails to load, registers no copy', async t => {
+  const page = await loadRealMonaco({ bridge: 'none' });
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  useLanguages(monaco);
+  await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'ADO\'s grammars');
+  monaco.editor.colorize = () => Promise.reject(new Error('load failed'));
+
+  page.startBridge();
+  await settle(window);
+
+  for (const language of LANGUAGES) assert.equal(hasCallTokens(monaco, language), false, language);
+});
+
 test('a copy that Monaco rejects leaves ADO\'s grammar for that language only', async t => {
   const page = await loadRealMonaco({ bridge: 'none' });
   t.after(() => page.close());
   const { monaco, window } = page;
+  useLanguages(monaco);
   await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'ADO\'s grammars');
   const setMonarchTokensProvider = monaco.languages.setMonarchTokensProvider;
   monaco.languages.setMonarchTokensProvider = (languageId, languageDef) => {
@@ -413,6 +495,7 @@ for (const missing of ['editor.colorize', 'languages.onLanguage']) {
     const page = await loadRealMonaco({ bridge: 'none' });
     t.after(() => page.close());
     const { monaco, window } = page;
+    useLanguages(monaco);
     await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'ADO\'s grammars');
     const [namespace, member] = missing.split('.');
     delete monaco[namespace][member];

@@ -207,7 +207,10 @@
         ? [new RegExp(`(${classKeywords})([ \\t]+)([a-zA-Z_$][\\w$]*)`), [keywordToken, '', SCRIPT_NAME_TOKEN]]
         : [new RegExp(`(${classKeywords})([ \\t]+)(?=[\\w$])`), [keywordToken, { token: '', next: '@className' }]],
       [new RegExp(`(\\.)([ \\t]*)([a-zA-Z_$][\\w$]*)${call}`), ['delimiter', '', callToken('memberCallKeywords')]],
-      [new RegExp(`[a-zA-Z_$][\\w$]*${call}`), callToken('callKeywords')]
+      [new RegExp(`[a-zA-Z_$][\\w$]*${call}`), callToken('callKeywords')],
+      // Prism highlights a .vue script block as a whole and sees a generic call that spans lines. Monaco reads one
+      // line, so the Vue compiler macros, which are always calls, are calls before `<`.
+      ...(typescript ? [[/(?:defineEmits|defineModel|defineOptions|defineProps|defineSlots)(?=\s*<)/, 'function']] : [])
     ];
   }
 
@@ -390,6 +393,16 @@
     '@keywords': { token: 'keyword.$0', next: '@qualified' }
   };
 
+  // Added. An attribute starts at `[` before a name at the start of a line, after `(` or after `,`, as in Prism,
+  // but not inside the hole of an interpolated string, whose closing brace must still end the hole.
+  const CSHARP_ATTRIBUTE_START = {
+    cases: {
+      '$S2==interpolatedstring': 'delimiter.square',
+      '$S2==litinterpstring': 'delimiter.square',
+      '@default': { token: 'delimiter.square', next: '@attribute' }
+    }
+  };
+
   const csharpLanguage = {
     defaultToken: '',
     tokenPostfix: '.cs',
@@ -438,7 +451,9 @@
     tokenizer: {
       root: [
         // Added.
-        [/^([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['', { token: 'delimiter.square', next: '@attribute' }]],
+        [/^([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['', CSHARP_ATTRIBUTE_START]],
+        [/(\()([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['delimiter.parenthesis', '', CSHARP_ATTRIBUTE_START]],
+        [/(,)([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['delimiter', '', CSHARP_ATTRIBUTE_START]],
         [/(class|enum|interface|record|struct)([ \t\v\f\r\n]+)(\@?[a-zA-Z_]\w*)/, [
           { cases: { '@keywords': { token: 'keyword.$1' }, '@default': 'identifier' } },
           '',
@@ -502,17 +517,18 @@
         ['', '', '@pop']
       ],
       // Added. The names of an attribute such as [HttpGet("{id}")]; its arguments are code. Prism reads a generic
-      // name before `(`, as in [ProducesResponseType<Foo>(200)], as a call.
+      // name before `(`, as in [ProducesResponseType<Foo>(200)], as a call. The arguments end at a `)` that ends
+      // the line or comes before `,` or `]`, so nested parentheses need no state of their own.
       attribute: [
         [/\@?[a-zA-Z_]\w*(?=\s*@generic\s*\()/, { token: 'function', next: '@qualified' }],
         [/\@?[a-zA-Z_]\w*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
         [/\(/, { token: 'delimiter.parenthesis', next: '@attributeArguments' }],
+        [/(\])([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['delimiter.square', '', 'delimiter.square']],
         [/\]/, { token: 'delimiter.square', next: '@pop' }],
         { include: '@root' }
       ],
       attributeArguments: [
-        [/\(/, { token: 'delimiter.parenthesis', next: '@push' }],
-        [/\)/, { token: 'delimiter.parenthesis', next: '@pop' }],
+        [/\)(?=[ \t]*(?:[,\]]|$))/, { token: 'delimiter.parenthesis', next: '@pop' }],
         { include: '@root' }
       ],
       namespace: [
@@ -740,16 +756,18 @@
 
   // Monaco loads ADO's grammar for a language the first time the language is used, and that grammar then
   // replaces any grammar registered for it before. colorize() waits for a grammar that is still loading, so each
-  // copy is registered after ADO's. A language that is not registered yet is handled on its first use.
+  // copy is registered after ADO's. When colorize() fails, ADO's grammar did not load, and no copy is registered.
+  // A language that no model uses yet is handled on its first use, so the bridge loads no grammar itself.
   function startCallGrammars() {
-    const { languages } = monaco;
-    if (!hasFunctions(languages, ['getLanguages', 'onLanguage', 'setMonarchTokensProvider']) || !hasFunctions(monaco.editor, ['colorize'])) return;
+    const { languages, editor } = monaco;
+    if (!hasFunctions(languages, ['onLanguage', 'setMonarchTokensProvider']) || !hasFunctions(editor, ['colorize', 'getModels'])) return;
+    const usedLanguages = new Set(editor.getModels().map(getModelLanguage));
     for (const [languageId, grammar] of Object.entries(CALL_GRAMMARS)) {
       const register = guarded(() => languages.setMonarchTokensProvider(languageId, grammar));
       const registerAfterAdoGrammar = () => {
-        Promise.resolve().then(() => monaco.editor.colorize('', languageId, {})).then(register, register);
+        Promise.resolve().then(() => editor.colorize('', languageId, {})).then(register, () => {});
       };
-      if (languages.getLanguages().some(language => language.id === languageId)) {
+      if (usedLanguages.has(languageId)) {
         registerAfterAdoGrammar();
       } else {
         languages.onLanguage(languageId, guarded(registerAfterAdoGrammar));
