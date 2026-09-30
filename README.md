@@ -90,7 +90,7 @@ When you open one file of a pull request, Azure DevOps shows it in a Monaco edit
 
 - Code in every file type gets the token colors of the theme you selected. With the automatic theme, the light Azure DevOps theme uses One Light and the dark theme uses Tomorrow Night. Background and diff colors stay the same as in Azure DevOps.
 - A `.vue` file gets the same languages per block as in the Files view. The editor already holds the full file text, so this view sends no requests.
-- In TypeScript, JavaScript, C# and `.vue` files, a function call such as `formatDollars(x)` gets the function color, as in the Files view.
+- In TypeScript, JavaScript, C# and `.vue` files, a function call such as `formatDollars(x)` gets the function color, and operators and `true` and `false` get the operator and boolean colors, as in the Files view.
 
 If the extension cannot reach the Monaco editor of the page, this view shows the default Azure DevOps colors.
 

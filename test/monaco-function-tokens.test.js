@@ -222,6 +222,68 @@ const CSHARP_CALLS = [
   'throw new ArgumentNullException(nameof(item));'
 ];
 
+const SCRIPT_OPERATORS = [
+  'const ok = a < b && c > d || !e ? f : g ?? h;',
+  'let x: Array<string> = [...items]; y?.z; y?.(1); y?.[0]; a!.b; x += 1; x **= 2; i++; --j; a >>> 2; ~c;',
+  'const f = (a: number): boolean => a === 1 || a !== 2 && a <= 3 && a >= 0;',
+  'const flags = { on: true, off: false, none: null, n: -1 }; if (!false) {} obj.true; x = y ? true : false;',
+  'type U = A | B & C; function g<T extends object>(v?: T): v is T { return v != null; }',
+  'const s = `sum ${a + b * c} of ${list.length > 0}`; x ||= y; x &&= z; x ??= w; x %= 3; x ^= 1; x <<= 1;'
+];
+
+const TYPESCRIPT_OPERATORS = [
+  '@Component({ name: \'x\' }) class A { @Prop() readonly value!: string; }'
+];
+
+const CSHARP_OPERATORS = [
+  'var ok = a < b && c > d || !e ? f : g ?? h; x ??= y;',
+  'var r = arr[1..^1]; Func<int, bool> p = i => i >= 0 && i != 3; x += 1; x <<= 2; y = ~y; i++; --j;',
+  'var d = new Dictionary<string, List<int>>(); List<int> xs = new(); int? n = null; var m = a?.b ?? c;',
+  'global::System.Console.WriteLine(true); if (x is not null && flag == false || done != true) { }',
+  'public Task<ActionResult<List<CapModel>>> Get(Expression<Func<T, bool>> predicate) => Query<T>(predicate);',
+  'var t = flag ? true : false; bool b = !(a > 0); var q = items.Where(i => i.Ok).Select(i => i.Id * 2 - 1 / 3 % 4);',
+  'using ReviewEntity = TopProviderDb.Lib.Models.QualityReview.Review;',
+  'var presented = header[prefix.Length..].Trim() + s[..n] + s[a..b];',
+  '        return new ServerSidePaginatedResult<QualityReviewQueueEntryModel>'
+];
+
+// Each operator and boolean character in the corpus has the operator or boolean token in Monaco exactly where
+// Prism gives it that type, one line at a time as the multi-file view highlights a row.
+test('an operator or a boolean has its token where Prism shows one', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco } = page;
+  const Prism = loadPrism();
+  LANGUAGES.forEach(language => hasCallTokens(monaco, language));
+  await waitForCallTokens(monaco);
+  const corpora = {
+    typescript: [...SCRIPT_OPERATORS, ...TYPESCRIPT_OPERATORS, ...SCRIPT_CALLS],
+    javascript: [...SCRIPT_OPERATORS, ...SCRIPT_CALLS],
+    csharp: [...CSHARP_OPERATORS, ...CSHARP_CALLS]
+  };
+
+  for (const [language, corpus] of Object.entries(corpora)) {
+    const mismatches = [];
+    tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
+      const pieces = prismPieces(Prism, corpus[index], language);
+      let offset = 0;
+      for (const token of tokens) {
+        for (let char = offset; char < offset + token.text.length; char++) {
+          if (/\s/.test(corpus[index][char])) continue;
+          const { types } = pieces.find(piece => piece.start <= char && char < piece.end);
+          for (const kind of ['operator', 'boolean']) {
+            if (token.type.startsWith(`${kind}.`) !== types.includes(kind)) {
+              mismatches.push(`${kind} "${corpus[index][char]}" at ${char} (${token.type}, Prism ${types.join('/') || 'plain'}) in: ${corpus[index]}`);
+            }
+          }
+        }
+        offset += token.text.length;
+      }
+    });
+    assert.deepEqual(mismatches, [], language);
+  }
+});
+
 // Each name in the corpus is a function token in Monaco exactly where Prism tokenizes it as a function, one
 // line at a time as the multi-file view highlights a row.
 test('a call has the function token where Prism shows a function', async t => {
@@ -272,16 +334,25 @@ test('a Vue macro whose generic spans lines is a call and a new before a line br
     '}> = {};',
     'const value = new',
     '',
-    '  Factory();'
+    '  Factory();',
+    'const ok = !props.items?.length && emit(\'change\', 1) === undefined ? true : false;'
   ];
-  const lines = tokenizeLines(monaco, ['<script setup lang="ts">', ...script, '</script>']).slice(1);
+  const lines = tokenizeLines(monaco, ['<script setup lang="ts">', ...script, '</script>']).slice(1, -1);
   const pieces = prismPieces(Prism, script.join('\n'), 'typescript');
   let offset = 0;
   const mismatches = [];
+  const text = script.join('\n');
   lines.forEach((tokens, index) => {
     for (const token of tokens) {
       if (WORD_TOKEN.test(token.type) && token.type.startsWith('function.') !== isPrismCall(pieces, offset)) {
         mismatches.push(`${token.text} (${token.type}) in: ${script[index]}`);
+      }
+      for (let char = offset; char < offset + token.text.length; char++) {
+        if (/\s/.test(text[char])) continue;
+        const { types } = pieces.find(piece => piece.start <= char && char < piece.end);
+        for (const kind of ['operator', 'boolean']) {
+          if (token.type.startsWith(`${kind}.`) !== types.includes(kind)) mismatches.push(`${kind} "${text[char]}" in: ${script[index]}`);
+        }
       }
       offset += token.text.length;
     }
@@ -357,6 +428,22 @@ const CSHARP_EDGES = [
 // A call as the copies find one: a name, then `(`, `<...>(` or `.call(` and the like.
 const CALL_FOLLOWS = /^\s*(?:<.*>\s*|\.\s*(?:apply|bind|call)\s*)?\(/;
 
+// The token type of each character of a line. Monaco merges neighbors of the same type, so a change of type can
+// move token boundaries; characters keep their place.
+function charTypes(line) {
+  return line.flatMap(token => [...token.text].map(() => token.type));
+}
+
+// The changes that the copies make, as [new type, old type]: a call becomes a function, an operator character
+// (a delimiter, an untyped symbol or TypeScript's `@`) becomes an operator, true and false become booleans, and
+// C# punctuation such as `?` and `:` becomes a delimiter.
+const ALLOWED_CHANGES = [
+  [/^function\./, /^(?:identifier|keyword|type\.identifier)(?:\.|$)/],
+  [/^operator\./, /^(?:delimiter(?:\.|$)|invalid\.|$)/],
+  [/^boolean\./, /^keyword\./],
+  [/^delimiter\./, /^(?:delimiter\.|$)/]
+];
+
 // Monaco's own grammars on the left, the bridge's copies on the right: only a call changes, from an identifier,
 // a keyword or a type name to function, and every token keeps its offset.
 test('every other token is the same as in Monaco\'s own grammar', async t => {
@@ -364,8 +451,12 @@ test('every other token is the same as in Monaco\'s own grammar', async t => {
   t.after(() => page.close());
   const { monaco } = page;
   const scripts = ['monaco_bridge.js', 'content_script.js'].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
-  const scriptSample = [TYPESCRIPT_SAMPLE, ...SCRIPT_CALLS, scripts].join('\n');
-  const samples = { typescript: scriptSample, javascript: scriptSample, csharp: [CSHARP_SAMPLE, ...CSHARP_CALLS, ...CSHARP_EDGES].join('\n') };
+  const scriptSample = [TYPESCRIPT_SAMPLE, ...SCRIPT_CALLS, ...SCRIPT_OPERATORS, ...TYPESCRIPT_OPERATORS, scripts].join('\n');
+  const samples = {
+    typescript: scriptSample,
+    javascript: scriptSample,
+    csharp: [CSHARP_SAMPLE, ...CSHARP_CALLS, ...CSHARP_OPERATORS, ...CSHARP_EDGES].join('\n')
+  };
   await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'Monaco\'s own grammars');
   const before = Object.fromEntries(LANGUAGES.map(language => [language, tokenize(monaco, samples[language], language)]));
 
@@ -373,23 +464,28 @@ test('every other token is the same as in Monaco\'s own grammar', async t => {
   await waitForCallTokens(monaco);
 
   for (const language of LANGUAGES) {
-    const postfix = POSTFIX[language];
     const after = tokenize(monaco, samples[language], language);
     const lines = samples[language].split('\n');
-    let calls = 0;
+    const changes = { function: 0, operator: 0, boolean: 0 };
     after.forEach((line, index) => {
-      const old = before[language][index];
-      assert.deepEqual(line.map(token => token.text), old.map(token => token.text), `${language} line ${index + 1}: ${lines[index]}`);
-      line.forEach((token, tokenIndex) => {
-        if (token.type === old[tokenIndex].type) return;
-        const where = `${language} line ${index + 1}, "${token.text}": ${lines[index]}`;
-        assert.equal(token.type, `function.${postfix}`, where);
-        assert.match(old[tokenIndex].type, /^(?:identifier|keyword|type\.identifier)(?:\.|$)/, where);
-        assert.match(lines[index].slice(line.slice(0, tokenIndex + 1).map(piece => piece.text).join('').length), CALL_FOLLOWS, where);
-        calls++;
-      });
+      const oldTypes = charTypes(before[language][index]);
+      assert.equal(charTypes(line).length, oldTypes.length, `${language} line ${index + 1}: ${lines[index]}`);
+      let offset = 0;
+      for (const token of line) {
+        const end = offset + token.text.length;
+        for (let char = offset; char < end; char++) {
+          if (token.type === oldTypes[char]) continue;
+          const where = `${language} line ${index + 1}, "${token.text}" was ${oldTypes[char]}: ${lines[index]}`;
+          const change = ALLOWED_CHANGES.find(([next, previous]) => next.test(token.type) && previous.test(oldTypes[char]));
+          assert.ok(change, `${where} is now ${token.type}`);
+          if (change[0] === ALLOWED_CHANGES[0][0]) assert.match(lines[index].slice(end), CALL_FOLLOWS, where);
+          const kind = token.type.split('.')[0];
+          if (kind in changes) changes[kind]++;
+        }
+        offset = end;
+      }
     });
-    assert.ok(calls >= 5, `${language}: ${calls} calls`);
+    for (const [kind, count] of Object.entries(changes)) assert.ok(count >= 5, `${language}: ${count} ${kind} characters`);
   }
 });
 
@@ -600,6 +696,36 @@ test('a function token renders in the Prism function color in both bases', async
       const pieces = await renderedColors(monaco, window, text, language);
       assert.equal(pieces.find(piece => piece.text === name)?.color, color, `${themeName} ${language}: ${JSON.stringify(pieces)}`);
       assert.notEqual(pieces.find(piece => piece.text === 'x')?.color, color, `${themeName} ${language}: x is not a call`);
+    }
+  }
+});
+
+test('operator and boolean tokens render in the Prism operator and boolean colors in both bases', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const style = foreground => ({ foreground, fontStyle: '' });
+  page.sendTheme({
+    vs: { operator: style('#111111'), boolean: style('#222222') },
+    'vs-dark': { operator: style('#333333'), boolean: style('#444444') }
+  });
+  LANGUAGES.forEach(language => hasCallTokens(monaco, language));
+  await waitForCallTokens(monaco);
+  await waitForEmbeddedGrammars(monaco);
+  const cases = [
+    ['const t = a === true', 'typescript'],
+    ['const t = a === true', 'javascript'],
+    ['var t = a == true;', 'csharp'],
+    ['<template>\n  <p>{{ a === true }}</p>\n</template>', 'vue']
+  ];
+
+  for (const [themeName, operator, boolean] of [['vs', '#111111', '#222222'], ['vs-dark', '#333333', '#444444']]) {
+    monaco.editor.setTheme(themeName);
+    for (const [text, language] of cases) {
+      const pieces = await renderedColors(monaco, window, text, language);
+      const where = `${themeName} ${language}: ${JSON.stringify(pieces)}`;
+      assert.equal(pieces.find(piece => /^={2,3}$/.test(piece.text))?.color, operator, where);
+      assert.equal(pieces.find(piece => piece.text === 'true')?.color, boolean, where);
     }
   }
 });

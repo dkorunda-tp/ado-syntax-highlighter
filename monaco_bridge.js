@@ -1,7 +1,7 @@
 // Runs in the page's main world, where ADO's Monaco lives. The single-file view of a pull request is a Monaco
 // editor, so it is colored through Monaco itself: .vue files get a Vue language, TypeScript, JavaScript and C#
-// get Monaco's own grammars with a function token for calls, and the built-in vs and vs-dark themes get the
-// token colors of the chosen Prism theme, sent by content_script.js.
+// get Monaco's own grammars with function, operator and boolean tokens, and the built-in vs and vs-dark themes
+// get the token colors of the chosen Prism theme, sent by content_script.js.
 // Anything missing or throwing leaves ADO's own rendering in place.
 (() => {
   const BRIDGE_FLAG = '__adoSyntaxHighlighterMonacoBridge';
@@ -21,7 +21,8 @@
   const MONACO_TOKENS = {
     comment: ['comment'],
     keyword: ['keyword', 'keyword.flow'],
-    boolean: ['keyword.json'],
+    // `boolean` is the true and false token of the bridge's typescript, javascript and csharp grammars.
+    boolean: ['keyword.json', 'boolean'],
     string: ['string', 'string.html', 'string.sql', 'string.yaml', 'string.value.json'],
     property: ['key', 'string.key.json', 'attribute.name.css', 'attribute.name.scss'],
     number: ['number', 'number.hex'],
@@ -160,8 +161,9 @@
 
   /*
    * The typescript, javascript and csharp grammars below are copied from monaco-editor 0.29.1
-   * (esm/vs/basic-languages). The only change is the parts marked "Added": a call is a function token, where
-   * Prism's grammar of the same language shows a function. The patterns and word lists of the Added parts are
+   * (esm/vs/basic-languages). The only change is the parts marked "Added": a call, an operator and true or false
+   * get the function, operator and boolean tokens, where Prism's grammar of the same language gives those types.
+   * The patterns and word lists of the Added parts are
    * taken from the bundled Prism 1.30.0 (prism/prism.js), under the same MIT license.
    *
    * Copyright (c) 2016 - present Microsoft Corporation
@@ -190,8 +192,11 @@
   // grammars. A name is a call before `(`, and in TypeScript also before `<...>(`, `.call(`, `.apply(` or
   // `.bind(`. It is not a call where Prism shows a keyword, a constant (capitals only) or, in JavaScript, a
   // built-in class. After `.` fewer names are keywords, and after `new`, `class` and the like a name is a class.
-  // A name that is not a call keeps the token of Monaco's own grammar.
-  const SCRIPT_NAME_TOKEN = { cases: { '~[A-Z].*': 'type.identifier', '@keywords': 'keyword', '@default': 'identifier' } };
+  // A name that is not a call keeps the token of Monaco's own grammar, except that true and false are booleans.
+  // The same rules make `...`, `?.` and TypeScript's decorator `@` operators, as in Prism.
+  const SCRIPT_NAME_TOKEN = {
+    cases: { '~[A-Z].*': 'type.identifier', '~false|true': 'boolean', '@keywords': 'keyword', '@default': 'identifier' }
+  };
 
   function scriptCallRules({ classKeywords, typescript = false, classNames = null }) {
     const call = typescript ? '(?=\\s*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\\s*|\\.\\s*(?:apply|bind|call)\\s*)?\\()' : '(?=\\s*\\()';
@@ -205,14 +210,19 @@
     });
     const keywordToken = { cases: { '@keywords': 'keyword', '@default': 'identifier' } };
     return [
+      [/\.\.\./, 'operator'],
+      ...(typescript ? [[/@(?=[\w$])/, 'operator']] : []),
       [new RegExp(`(?:${classKeywords})(?=[ \\t]*$)`), {
         cases: { '@keywords': { token: 'keyword', next: '@classNameAfterBreak' }, '@default': { token: 'identifier', next: '@classNameAfterBreak' } }
       }],
       typescript
         ? [new RegExp(`(${classKeywords})([ \\t]+)([a-zA-Z_$][\\w$]*)`), [keywordToken, '', SCRIPT_NAME_TOKEN]]
         : [new RegExp(`(${classKeywords})([ \\t]+)(?=[\\w$])`), [keywordToken, { token: '', next: '@className' }]],
-      [new RegExp(`(\\.)([ \\t]*)([a-zA-Z_$][\\w$]*)${call}`), ['delimiter', '', callToken('memberCallKeywords')]],
+      [new RegExp(`(\\?\\.|\\.)([ \\t]*)([a-zA-Z_$][\\w$]*)${call}`), [
+        { cases: { '~\\?\\.': 'operator', '@default': 'delimiter' } }, '', callToken('memberCallKeywords')
+      ]],
       [new RegExp(`[a-zA-Z_$][\\w$]*${call}`), callToken('callKeywords')],
+      [/(?:false|true)(?![\w$])/, 'boolean'],
       // Prism highlights a .vue script block as a whole and sees a generic call that spans lines. Monaco reads one
       // line, so the Vue compiler macros, which are always calls, are calls before `<`.
       ...(typescript ? [[/(?:defineEmits|defineModel|defineOptions|defineProps|defineSlots)(?=\s*<)/, 'function']] : [])
@@ -239,9 +249,12 @@
       { include: '@whitespace' },
       [/\/(?=([^\\\/]|\\.)+\/([dgimsuy]*)(\s*)(\.|;|,|\)|\]|\}|$))/, { token: 'regexp', bracket: '@open', next: '@regexp' }],
       [/[()\[\]]/, '@brackets'],
-      [/[<>](?!@symbols)/, '@brackets'],
-      [/!(?=([^=]|$))/, 'delimiter'],
-      [/@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
+      // Added: the next three rules give `operator`, where Prism does, in place of '@brackets', 'delimiter' and
+      // the operator cases. `?.` is one operator, as in Prism.
+      [/[<>](?!@symbols)/, 'operator'],
+      [/!(?=([^=]|$))/, 'operator'],
+      [/\?\./, 'operator'],
+      [/@symbols/, 'operator'],
       [/(@digits)[eE]([\-+]?(@digits))?/, 'number.float'],
       [/(@digits)\.(@digits)([eE][\-+]?(@digits))?/, 'number.float'],
       [/0[xX](@hexdigits)n?/, 'number.hex'],
@@ -473,6 +486,7 @@
     tokenizer: {
       root: [
         // Added.
+        [/\.\./, 'operator'],
         [/^([ \t]*)(\[)(?=@attributeHead)/, ['', CSHARP_ATTRIBUTE_START]],
         [/(\()([ \t]*)(\[)(?=@attributeHead)/, ['delimiter.parenthesis', '', CSHARP_ATTRIBUTE_START]],
         [/(,)([ \t]*)(\[)(?=@attributeHead)/, ['delimiter', '', CSHARP_ATTRIBUTE_START]],
@@ -488,8 +502,15 @@
             '@default': { token: 'function', next: '@qualified' }
           }
         }],
-        // Added: the `new` case.
-        [/\@?[a-zA-Z_]\w*/, { cases: { new: { token: 'keyword.$0', next: '@constructed' },...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } } }],
+        // Added: the `new` case and the boolean case.
+        [/\@?[a-zA-Z_]\w*/, {
+          cases: {
+            new: { token: 'keyword.$0', next: '@constructed' },
+            '~false|true': { token: 'boolean', next: '@qualified' },
+            ...csharpIdentifierCases,
+            '@default': { token: 'identifier', next: '@qualified' }
+          }
+        }],
         { include: '@whitespace' },
         [/}/, {
           cases: {
@@ -499,8 +520,13 @@
           }
         }],
         [/[{}()\[\]]/, '@brackets'],
-        [/[<>](?!@symbols)/, '@brackets'],
-        [/@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
+        // Added: the next four rules take Prism's types in place of '@brackets' and the operator cases: `?`, `:`
+        // and `::` are punctuation, `??` and every other symbol is an operator. The `<` and `>` of type arguments
+        // are punctuation (see typeArguments).
+        [/[<>](?!@symbols)/, 'operator'],
+        [/\?\?=?/, 'operator'],
+        [/::?|\?/, 'delimiter'],
+        [/[=><!~&|+\-*\/\^%]+/, 'operator'],
         [/[0-9_]*\.[0-9_]+([eE][\-+]?\d+)?[fFdD]?/, 'number.float'],
         [/0[xX][0-9a-fA-F_]+/, 'number.hex'],
         [/0[bB][01_]+/, 'number.hex'],
@@ -524,8 +550,19 @@
           }
         }],
         [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
+        // Added: a range `..` after a name, as in s[a..b], is an operator.
+        [/\.\./, { token: 'operator', next: '@pop' }],
         [/\./, 'delimiter'],
+        // Added.
+        [/[ \t]+(?=@generic\s*\()/, ''],
+        [/(?=@generic)</, { token: 'delimiter.angle', switchTo: '@typeArguments' }],
         ['', '', '@pop']
+      ],
+      // Added. The type arguments right after a name, such as <string, List<int>>, where Prism reads the angle
+      // brackets as punctuation.
+      typeArguments: [
+        [/>/, { token: 'delimiter.angle', next: '@pop' }],
+        { include: '@root' }
       ],
       // Added. The type after `new`, such as Foo or Foo.Bar in new Foo.Bar(.
       constructed: [
@@ -536,6 +573,8 @@
       typeName: [
         [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
         [/\./, 'delimiter'],
+        // Prism reads the type arguments after `new` as a type only before `(`, `[` or `{` on the same line.
+        [/(?=@generic\s*[(\[{])</, { token: 'delimiter.angle', switchTo: '@typeArguments' }],
         ['', '', '@pop']
       ],
       // Added. The names of an attribute such as [HttpGet("{id}")]; its arguments are code. Prism reads a generic
@@ -556,7 +595,9 @@
       namespace: [
         { include: '@whitespace' },
         [/[A-Z]\w*/, 'namespace'],
-        [/[\.=]/, 'delimiter'],
+        // Added: `=` of a using alias is an operator, as in Prism; it was part of this 'delimiter' rule.
+        [/=/, 'operator'],
+        [/\./, 'delimiter'],
         ['', '', '@pop']
       ],
       comment: [
