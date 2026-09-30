@@ -205,6 +205,9 @@
     });
     const keywordToken = { cases: { '@keywords': 'keyword', '@default': 'identifier' } };
     return [
+      [new RegExp(`(?:${classKeywords})(?=[ \\t]*$)`), {
+        cases: { '@keywords': { token: 'keyword', next: '@classNameAfterBreak' }, '@default': { token: 'identifier', next: '@classNameAfterBreak' } }
+      }],
       typescript
         ? [new RegExp(`(${classKeywords})([ \\t]+)([a-zA-Z_$][\\w$]*)`), [keywordToken, '', SCRIPT_NAME_TOKEN]]
         : [new RegExp(`(${classKeywords})([ \\t]+)(?=[\\w$])`), [keywordToken, { token: '', next: '@className' }]],
@@ -213,6 +216,17 @@
       // Prism highlights a .vue script block as a whole and sees a generic call that spans lines. Monaco reads one
       // line, so the Vue compiler macros, which are always calls, are calls before `<`.
       ...(typescript ? [[/(?:defineEmits|defineModel|defineOptions|defineProps|defineSlots)(?=\s*<)/, 'function']] : [])
+    ];
+  }
+
+  // Added. The class name on a later line than `new`, `class` and the like, as Prism reads it across blank lines.
+  function classNameAfterBreak(next) {
+    const token = type => ({ token: type, ...next });
+    return [
+      [/^$/, ''],
+      [/[ \t]+/, ''],
+      [/[a-zA-Z_$][\w$]*/, { cases: { '~[A-Z].*': token('type.identifier'), '@keywords': token('keyword'), '@default': token('identifier') } }],
+      ['', '', '@pop']
     ];
   }
 
@@ -341,7 +355,9 @@
       common: [
         ...scriptCallRules({ classKeywords: 'class|extends|implements|instanceof|interface|new|type', typescript: true }),
         ...scriptTokenizer.common
-      ]
+      ],
+      // Added.
+      classNameAfterBreak: classNameAfterBreak({ next: '@pop' })
     }
   };
 
@@ -386,7 +402,8 @@
         [/[a-zA-Z_$][\w$]*/, SCRIPT_NAME_TOKEN],
         [/\./, 'delimiter'],
         ['', '', '@pop']
-      ]
+      ],
+      classNameAfterBreak: classNameAfterBreak({ switchTo: '@className' })
     }
   };
 
@@ -450,12 +467,15 @@
       'where', 'while', 'yield'
     ],
     generic: /<(?:[^<>;=+\-*\/%&|^]|<(?:[^<>;=+\-*\/%&|^]|<[^<>;=+\-*\/%&|^]*>)*>)*>/,
+    // The first attribute after `[`, as Prism reads one: an optional target, a name, optional generic arguments and
+    // arguments, then `,` or `]` on the same line.
+    attributeHead: /[ \t]*(?:[a-z]+[ \t]*:[ \t]*)?@?[a-zA-Z_][\w.]*(?:[ \t]*@generic)?[ \t]*(?:\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))?[ \t]*[,\]]/,
     tokenizer: {
       root: [
         // Added.
-        [/^([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['', CSHARP_ATTRIBUTE_START]],
-        [/(\()([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['delimiter.parenthesis', '', CSHARP_ATTRIBUTE_START]],
-        [/(,)([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['delimiter', '', CSHARP_ATTRIBUTE_START]],
+        [/^([ \t]*)(\[)(?=@attributeHead)/, ['', CSHARP_ATTRIBUTE_START]],
+        [/(\()([ \t]*)(\[)(?=@attributeHead)/, ['delimiter.parenthesis', '', CSHARP_ATTRIBUTE_START]],
+        [/(,)([ \t]*)(\[)(?=@attributeHead)/, ['delimiter', '', CSHARP_ATTRIBUTE_START]],
         [/(class|enum|interface|record|struct)([ \t\v\f\r\n]+)(\@?[a-zA-Z_]\w*)/, [
           { cases: { '@keywords': { token: 'keyword.$1' }, '@default': 'identifier' } },
           '',
@@ -525,7 +545,7 @@
         [/\@?[a-zA-Z_]\w*(?=\s*@generic\s*\()/, { token: 'function', next: '@qualified' }],
         [/\@?[a-zA-Z_]\w*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
         [/\(/, { token: 'delimiter.parenthesis', next: '@attributeArguments' }],
-        [/(\])([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['delimiter.square', '', 'delimiter.square']],
+        [/(\])([ \t]*)(\[)(?=@attributeHead)/, ['delimiter.square', '', 'delimiter.square']],
         [/\]/, { token: 'delimiter.square', next: '@pop' }],
         { include: '@root' }
       ],
@@ -759,17 +779,17 @@
   // Monaco loads ADO's grammar for a language the first time the language is used, and that grammar then
   // replaces any grammar registered for it before. colorize() waits for a grammar that is still loading, so each
   // copy is registered after ADO's. When colorize() fails, ADO's grammar did not load, and no copy is registered.
-  // A language that no model uses yet is handled on its first use, so the bridge loads no grammar itself.
+  // A language that is not registered yet is handled on its first use. After a late start, a registered language
+  // is handled at once: Monaco reports a first use only once, and it may have happened already.
   function startCallGrammars() {
     const { languages, editor } = monaco;
-    if (!hasFunctions(languages, ['onLanguage', 'setMonarchTokensProvider']) || !hasFunctions(editor, ['colorize', 'getModels'])) return;
-    const usedLanguages = new Set(editor.getModels().map(getModelLanguage));
+    if (!hasFunctions(languages, ['getLanguages', 'onLanguage', 'setMonarchTokensProvider']) || !hasFunctions(editor, ['colorize'])) return;
     for (const [languageId, grammar] of Object.entries(CALL_GRAMMARS)) {
       const register = guarded(() => languages.setMonarchTokensProvider(languageId, grammar));
       const registerAfterAdoGrammar = () => {
         Promise.resolve().then(() => editor.colorize('', languageId, {})).then(register, () => {});
       };
-      if (usedLanguages.has(languageId)) {
+      if (languages.getLanguages().some(language => language.id === languageId)) {
         registerAfterAdoGrammar();
       } else {
         guarded(() => languages.onLanguage(languageId, guarded(registerAfterAdoGrammar)))();
