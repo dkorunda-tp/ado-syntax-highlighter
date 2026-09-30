@@ -37,10 +37,10 @@ function prismPieces(Prism, line, language) {
   return pieces;
 }
 
-// A call in Prism is a function token. `function-variable` (a name that is assigned a function) is not a call.
+// A function token in Prism: a call, or a name that is assigned a function (`function-variable`).
 function isPrismCall(pieces, offset) {
   const { types } = pieces.find(piece => piece.start <= offset && offset < piece.end);
-  return types.includes('function') && !types.includes('function-variable');
+  return types.includes('function');
 }
 
 const WORD_TOKEN = /^(?:identifier|keyword|type\.identifier|function)(?:\.|$)/;
@@ -189,7 +189,12 @@ const SCRIPT_CALLS = [
   'export function formatCapPercent(value: number): string { return `${round(value * 100)}%`; }',
   'emit(\'update\', value); nextTick(() => focus()); watch(() => props.id, load);',
   'import(\'./x\').then(m => m.default(1)); require(\'y\'); get(1); set(2); from(3); async (x) => x;',
-  'x.$emit(\'close\'); _private(1); $jq(1); a?.b?.(1); a?.c(2); ...spread(3);'
+  'x.$emit(\'close\'); _private(1); $jq(1); a?.b?.(1); a?.c(2); ...spread(3);',
+  // Names that are assigned a function: Prism's function-variable rule.
+  'const handler = (e) => emit(e); const load = async () => fetch(x); const fn = function (a) { return a; };',
+  'export default { props: { items: { type: Array, default: () => [] } }, methods: { save: async (id) => post(id), close: x => x } };',
+  'this.onChange = (v) => v; obj.run = function () {}; let cb: Handler = (a) => a; x.y = z => z; const k = async x => x;',
+  'const MAX = () => 1; const Pick = ({ a }) => a; const t = (a, (b)) => 1; if (a == function () {}) {} x += () => 1;'
 ];
 
 const CSHARP_CALLS = [
@@ -339,7 +344,8 @@ test('a Vue macro whose generic spans lines is a call and a new before a line br
     'const value = new',
     '',
     '  Factory();',
-    'const ok = !props.items?.length && emit(\'change\', 1) === undefined ? true : false;'
+    'const ok = !props.items?.length && emit(\'change\', 1) === undefined ? true : false;',
+    'const onSave = async (id: number) => emit(\'change\', id);'
   ];
   const lines = tokenizeLines(monaco, ['<script setup lang="ts">', ...script, '</script>']).slice(1, -1);
   const pieces = prismPieces(Prism, script.join('\n'), 'typescript');
@@ -437,6 +443,8 @@ const CSHARP_EDGES = [
 
 // A call as the copies find one: a name, then `(`, `<...>(` or `.call(` and the like.
 const CALL_FOLLOWS = /^\s*(?:<.*>\s*|\.\s*(?:apply|bind|call)\s*)?\(/;
+// Or a name that is assigned a function: `= (...) =>`, `: async x =>`, `= function`.
+const FUNCTION_VALUE_FOLLOWS = /^\s*[=:]\s*(?:async\s*)?(?:function\b|(?:\((?:[^()]|\([^()]*\))*\)|[a-zA-Z_$][\w$]*)\s*=>)/;
 
 // The token type of each character of a line. Monaco merges neighbors of the same type, so a change of type can
 // move token boundaries; characters keep their place.
@@ -488,7 +496,10 @@ test('every other token is the same as in Monaco\'s own grammar', async t => {
           const where = `${language} line ${index + 1}, "${token.text}" was ${oldTypes[char]}: ${lines[index]}`;
           const change = ALLOWED_CHANGES.find(([next, previous]) => next.test(token.type) && previous.test(oldTypes[char]));
           assert.ok(change, `${where} is now ${token.type}`);
-          if (change[0] === ALLOWED_CHANGES[0][0]) assert.match(lines[index].slice(end), CALL_FOLLOWS, where);
+          if (change[0] === ALLOWED_CHANGES[0][0]) {
+            const rest = lines[index].slice(end);
+            assert.ok(CALL_FOLLOWS.test(rest) || FUNCTION_VALUE_FOLLOWS.test(rest), `${where}: no call or function value follows`);
+          }
           const kind = token.type.split('.')[0];
           if (kind in changes) changes[kind]++;
         }

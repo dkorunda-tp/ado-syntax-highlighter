@@ -224,6 +224,9 @@
         { cases: { '~\\?\\.': 'operator', '@default': 'delimiter' } }, '', callToken('memberCallKeywords')
       ]],
       [new RegExp(`[a-zA-Z_$][\\w$]*${call}`), callToken('callKeywords')],
+      // A name that is assigned a function, as Prism's function-variable rule reads it: `x = (...) =>`,
+      // `key: async () =>`, `x = a =>` or `x = function`. Prism checks it before keywords and constants.
+      [/[a-zA-Z_$][\w$]*(?=\s*[=:]\s*(?:async\s*)?(?:function\b|(?:\((?:[^()]|\([^()]*\))*\)|[a-zA-Z_$][\w$]*)\s*=>))/, 'function'],
       [/(?:false|true)(?![\w$])/, 'boolean'],
       // Prism highlights a .vue script block as a whole and sees a generic call that spans lines. Monaco reads one
       // line, so the Vue compiler macros, which are always calls, are calls before `<`.
