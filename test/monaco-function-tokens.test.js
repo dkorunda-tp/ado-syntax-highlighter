@@ -421,6 +421,12 @@ let x = a?.b?.(1) || await load<Cap>('x');`;
 // interpolation hole, whose closing brace must still end the hole.
 const CSHARP_EDGES = [
   `[A(${'('.repeat(120)}1${')'.repeat(120)})]`,
+  // A symbol run that Monaco's own grammar reads as one, such as :// in a raw string it does not know, starts
+  // no comment (PR 9408, PlaybookChecklistStateTests.cs line 354).
+  '        var json = """{"url": "https://example.com/a"}""" ; var n = Count(1);',
+  'var a = b ?// c',
+  'var d = e ?? f ://* g */ h;',
+  'x ::/* y */ z;',
   'var s = $@"{',
   '[x',
   '}"; var n = Count(1);',

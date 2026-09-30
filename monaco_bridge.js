@@ -528,6 +528,9 @@
         // and `::` are punctuation, `??` and every other symbol is an operator. The `<` and `>` of type arguments
         // are punctuation (see typeArguments).
         [/[<>](?!@symbols)/, 'operator'],
+        // A symbol run with `//` or `/*` inside, such as :// or ?//, stays one run with the original token, as in
+        // Monaco's own grammar; split, its `//` would start a comment.
+        [/(?=[=><!~?:&|+\-*\/\^%]*(?:\/\/|\/\*))@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
         [/\?\?=?/, 'operator'],
         // A `:` that starts the format of an interpolation hole, as in {date:yyyy-MM-dd}, where Prism reads the
         // format as one format-string token with no operator.
