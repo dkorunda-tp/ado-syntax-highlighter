@@ -10,10 +10,13 @@ const {
   singleColumnRow,
   iteration,
   createAdoServer,
-  highlightedClones
+  highlightedClones,
+  texts,
+  perRowHtml
 } = require('./helpers');
 
 const PATH = '/frontend/src/components/playbooks/PlaybookChecklist.vue';
+const CUSTOM_STYLES = fs.readFileSync(path.join(__dirname, '..', 'custom_styles.css'), 'utf8');
 
 const LINES = [
   '<template>',
@@ -45,32 +48,24 @@ function server(text = LINES.join('\n')) {
   return createAdoServer({ iterations: [iteration(1, 'src1', 'common1')], files: { [`src1:${PATH}`]: text } });
 }
 
-async function highlight(diff, filePath = PATH) {
-  const { window, highlightCalls } = await loadExtension({ fetch: server().fetch });
-  const file = mount(window, fileCard({ filePath, diff }));
+// `text` is the file text the server returns for the new side, and `css` stands in for the injected styles.
+async function highlight(diff, { text, css } = {}) {
+  const { window, highlightCalls } = await loadExtension({ fetch: server(text).fetch, css });
+  const file = mount(window, fileCard({ filePath: PATH, diff }));
   await window.processFileDiff(file);
   return { window, highlightCalls, contents: highlightedClones(file).map(clone => clone.querySelector(':scope > div')) };
 }
 
-function addedFile() {
-  return highlight(LINES.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join(''));
-}
-
-function texts(content, selector) {
-  return [...content.querySelectorAll(selector)].map(element => element.textContent);
-}
-
-// The HTML that per-row highlighting gives, serialized the way the page serializes it.
-function perRow(window, text, language) {
-  const element = window.document.createElement('div');
-  element.innerHTML = window.Prism.highlight(text, window.Prism.languages[language], language);
-  return element.innerHTML;
+// An added file: every line is an added row, and the new side has the file text of `lines`.
+function addedFile(lines = LINES, { css } = {}) {
+  const diff = lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join('');
+  return highlight(diff, { text: lines.join('\n'), css });
 }
 
 test('the template block, its tag lines included, is vue-template; root lines and script tag lines stay markup', async () => {
   const { window, highlightCalls } = await addedFile();
 
-  const expected = LINES.map((line, index) => {
+  const expected = LINES.map((_, index) => {
     if (index <= 18) return 'vue-template';
     return index === 21 ? 'typescript' : 'markup';
   });
@@ -79,19 +74,9 @@ test('the template block, its tag lines included, is vue-template; root lines an
 });
 
 // The template tag lines are part of the template run, so a tag or a comment that crosses one keeps its tokens.
-async function addedFileOf(lines) {
-  const { window } = await loadExtension({ fetch: server(lines.join('\n')).fetch });
-  const file = mount(window, fileCard({
-    filePath: PATH,
-    diff: lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join('')
-  }));
-  await window.processFileDiff(file);
-  return highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
-}
-
 test('a comment that starts on the opening template tag line is a comment on every row', async () => {
   const lines = ['<template><!--', '  {{ x }}', '--><div />', '</template>'];
-  const contents = await addedFileOf(lines);
+  const { contents } = await addedFile(lines);
 
   assert.deepEqual(texts(contents[0], '.token.comment'), ['<!--']);
   assert.deepEqual(texts(contents[1], '.token.comment'), ['  {{ x }}']);
@@ -103,7 +88,7 @@ test('a comment that starts on the opening template tag line is a comment on eve
 
 test('a tag that starts on the opening template tag line keeps its tokens and directive values', async () => {
   const lines = ['<template><Comp', '  :value="item.id"', '/>', '</template>'];
-  const contents = await addedFileOf(lines);
+  const { contents } = await addedFile(lines);
 
   assert.deepEqual(texts(contents[0], '.token.tag > .token.tag'), ['<template', '<Comp']);
   assert.deepEqual(texts(contents[1], '.token.attr-name'), [':value']);
@@ -114,7 +99,7 @@ test('a tag that starts on the opening template tag line keeps its tokens and di
 
 test('a tag that ends on the closing template line keeps its tokens and directive values', async () => {
   const lines = ['<template>', '  <Comp', '    :value="item.id" /></template>'];
-  const contents = await addedFileOf(lines);
+  const { contents } = await addedFile(lines);
 
   assert.deepEqual(texts(contents[1], '.token.tag > .token.tag'), ['<Comp']);
   assert.deepEqual(texts(contents[2], '.token.special-attr > .token.typescript'), ['item.id']);
@@ -154,14 +139,7 @@ test('a directive value has no attr-value ancestor, and its identifiers keep the
     .prism-one-light .token.attr-name { color: rgb(0, 200, 0); }
     .prism-one-light .token.attr-value { color: rgb(0, 0, 200); }
     .prism-one-light .token.keyword { color: rgb(100, 0, 100); }`;
-  const css = `body { color: ${BASE}; } ${themeCss} ${fs.readFileSync(path.join(__dirname, '..', 'custom_styles.css'), 'utf8')}`;
-  const { window } = await loadExtension({ fetch: server().fetch, css });
-  const file = mount(window, fileCard({
-    filePath: PATH,
-    diff: LINES.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join('')
-  }));
-  await window.processFileDiff(file);
-  const contents = highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
+  const { window, contents } = await addedFile(LINES, { css: `body { color: ${BASE}; } ${themeCss} ${CUSTOM_STYLES}` });
   const values = [1, 3, 4, 7, 8, 11].flatMap(index => [...contents[index].querySelectorAll('.token.typescript')]);
   const colorOf = element => window.getComputedStyle(element).color;
 
@@ -177,9 +155,7 @@ test('a directive value has no attr-value ancestor, and its identifiers keep the
 });
 
 test('a non-vue tag keeps the theme tag color on its own text', async () => {
-  const css = '.prism-one-light .token.tag { color: rgb(200, 0, 0); } '
-    + fs.readFileSync(path.join(__dirname, '..', 'custom_styles.css'), 'utf8');
-  const { window } = await loadExtension({ css });
+  const { window } = await loadExtension({ css: `.prism-one-light .token.tag { color: rgb(200, 0, 0); } ${CUSTOM_STYLES}` });
   const content = window.document.createElement('div');
   content.className = 'prism-one-light';
   content.innerHTML = window.Prism.highlight('<div :key="a">', window.Prism.languages.markup, 'markup');
@@ -216,7 +192,7 @@ test('a v-slot value is TypeScript, a #slot without a value is an attribute name
 test('a #slot shorthand with a value is TypeScript', async () => {
   const { window } = await loadExtension();
   const content = window.document.createElement('div');
-  content.innerHTML = perRow(window, '<template #item="{ item, index }">', 'vue-template');
+  content.innerHTML = perRowHtml(window, '<template #item="{ item, index }">', 'vue-template');
 
   assert.deepEqual(texts(content, '.token.attr-name'), ['#item']);
   assert.deepEqual(texts(content, '.token.special-attr > .token.typescript'), ['{ item, index }']);
@@ -236,7 +212,7 @@ test('a multi-line :class object is TypeScript on every row', async () => {
   assert.deepEqual(texts(contents[9], '.token.special-attr > .token.attr-value'), ['"']);
 });
 
-test('a multi-line :aria-labelledby value is TypeScript on its middle row, with quote punctuation on the first and last rows', async () => {
+test('a multi-line :aria-labelledby value is TypeScript on its middle row, with attr-value quotes on the first and last rows', async () => {
   const { contents } = await addedFile();
 
   assert.deepEqual(texts(contents[10], '.token.tag .token.attr-name'), [':aria-labelledby']);
@@ -249,7 +225,7 @@ test('a multi-line :aria-labelledby value is TypeScript on its middle row, with 
   assert.equal(texts(contents[12], '.token.typescript').join('').trim(), '');
 });
 
-test('an interpolation over three rows has its braces and a TypeScript expression on every row', async () => {
+test('an interpolation over three rows has {{ on the first row, a TypeScript expression on the middle row and }} on the last', async () => {
   const { contents } = await addedFile();
 
   assert.deepEqual(texts(contents[13], '.token.tag > .token.punctuation'), ['>']);
@@ -264,7 +240,7 @@ test('an interpolation over three rows has its braces and a TypeScript expressio
 test('v-bind:x, v-on:x with modifiers, v-model and v-if values are TypeScript', async () => {
   const { window } = await loadExtension();
   const content = window.document.createElement('div');
-  content.innerHTML = perRow(window, `<a v-bind:href="url" v-on:click.stop="go()" v-model='name' v-if="ok">`, 'vue-template');
+  content.innerHTML = perRowHtml(window, `<a v-bind:href="url" v-on:click.stop="go()" v-model='name' v-if="ok">`, 'vue-template');
 
   assert.deepEqual(texts(content, '.token.attr-name'), ['v-bind:href', 'v-on:click.stop', 'v-model', 'v-if']);
   assert.deepEqual(texts(content, '.token.special-attr > .token.typescript'), ['url', 'go()', 'name', 'ok']);
@@ -275,7 +251,7 @@ test('v-bind:x, v-on:x with modifiers, v-model and v-if values are TypeScript', 
 test('a {{ }} inside an HTML comment stays part of the comment', async () => {
   const { window } = await loadExtension();
   const content = window.document.createElement('div');
-  content.innerHTML = perRow(window, '<!-- {{ old }} --><p>{{ now }}</p>', 'vue-template');
+  content.innerHTML = perRowHtml(window, '<!-- {{ old }} --><p>{{ now }}</p>', 'vue-template');
 
   assert.deepEqual(texts(content, '.token.comment'), ['<!-- {{ old }} -->']);
   assert.deepEqual(texts(content, '.token.interpolation'), ['{{ now }}']);
@@ -285,7 +261,7 @@ test('a {{ }} inside an HTML comment stays part of the comment', async () => {
 test('a tag or a comment inside a {{ }} string stays part of the TypeScript expression', async () => {
   const { window } = await loadExtension();
   const content = window.document.createElement('div');
-  content.innerHTML = perRow(window, `<p>{{ '<b>' + x }}</p><i>{{ '<!--y-->' }}</i>`, 'vue-template');
+  content.innerHTML = perRowHtml(window, `<p>{{ '<b>' + x }}</p><i>{{ '<!--y-->' }}</i>`, 'vue-template');
 
   assert.deepEqual(texts(content, '.token.interpolation'), [`{{ '<b>' + x }}`, `{{ '<!--y-->' }}`]);
   assert.deepEqual(texts(content, '.token.interpolation .token.string'), [`'<b>'`, `'<!--y-->'`]);
@@ -298,7 +274,7 @@ test('plain attributes give the same tokens as markup', async () => {
   const text = '<v-btn class="x" density="compact" style="color: red" onclick="go()" disabled>Save &amp; close</v-btn>';
 
   // The element token of vue-template has one more class, for the row color of text directly inside it.
-  assert.equal(perRow(window, text, 'vue-template').replaceAll('token tag vue-template-tag', 'token tag'), perRow(window, text, 'markup'));
+  assert.equal(perRowHtml(window, text, 'vue-template').replaceAll('token tag vue-template-tag', 'token tag'), perRowHtml(window, text, 'markup'));
 });
 
 test('an ADO span inside an interpolation and inside a directive value survives', async () => {
@@ -322,7 +298,7 @@ test('a template row whose text differs from its file line gets per-row vue-temp
   const code = '    {{ other.label }}';
   const { window, contents } = await highlight(inlineRow({ newLine: 3, type: 'added', code }));
 
-  assert.equal(contents[0].innerHTML, perRow(window, code, 'vue-template'));
+  assert.equal(contents[0].innerHTML, perRowHtml(window, code, 'vue-template'));
   assert.deepEqual(texts(contents[0], '.token.interpolation > .token.punctuation'), ['{{', '}}']);
 });
 
@@ -337,7 +313,7 @@ test('a non-vue file keeps markup rules: no interpolation and no TypeScript dire
   window.processFileDiff(file);
 
   const [content] = highlightedClones(file).map(clone => clone.querySelector(':scope > div'));
-  assert.equal(content.innerHTML, perRow(window, rows[0], 'html'));
+  assert.equal(content.innerHTML, perRowHtml(window, rows[0], 'html'));
   assert.deepEqual(texts(content, '.token.interpolation'), []);
   assert.deepEqual(texts(content, '.token.typescript'), []);
   assert.deepEqual(texts(content, '.token.attr-value'), ['="a"', '="b"']);

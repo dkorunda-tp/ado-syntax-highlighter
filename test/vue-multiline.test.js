@@ -9,7 +9,9 @@ const {
   sideBySide,
   iteration,
   createAdoServer,
-  highlightedClones
+  highlightedClones,
+  texts,
+  perRowHtml
 } = require('./helpers');
 
 const PATH = '/frontend/src/components/Account/AccountCapCards.vue';
@@ -67,18 +69,6 @@ function addedFile(lines = NEW_LINES, files) {
   return highlight(lines.map((code, index) => singleColumnRow({ line: index + 1, type: 'added', code })).join(''), PATH, files);
 }
 
-function texts(content, selector) {
-  return [...content.querySelectorAll(selector)].map(element => element.textContent);
-}
-
-// The HTML that per-row highlighting gives, serialized the way the page serializes it.
-function perRowHtml(window, text, language) {
-  const grammar = window.Prism.languages[language];
-  const element = window.document.createElement('div');
-  element.innerHTML = grammar ? window.Prism.highlight(text, grammar, language) : window.Prism.util.encode(text);
-  return element.innerHTML;
-}
-
 test('each line of the file token list has the text of its file line', async () => {
   const { window } = await loadExtension();
   const lines = Array.from(window.parseVueFileLines(NEW_LINES.join('\r\n')));
@@ -89,7 +79,7 @@ test('each line of the file token list has the text of its file line', async () 
   assert.deepEqual(lines.map(line => line.language), Array.from(window.parseVueLineLanguages(NEW_LINES.join('\n'))));
 });
 
-test('a multi-line opening tag gets tag, attr-name and attr-value tokens on every row', async () => {
+test('a multi-line opening tag gets tag and attr-name tokens on every row, and its directive values are TypeScript', async () => {
   const { contents } = await addedFile();
 
   assert.deepEqual(texts(contents[1], '.token.tag .token.punctuation'), ['<']);

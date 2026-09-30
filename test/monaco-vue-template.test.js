@@ -2,18 +2,7 @@
 // Runs the vue grammar of monaco_bridge.js on the real monaco-editor 0.29 build.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadRealMonaco, waitFor } = require('./monaco-helpers');
-
-function lineTokens(tokens, line) {
-  return Array.from(tokens, (token, index) => {
-    const end = index + 1 < tokens.length ? tokens[index + 1].offset : line.length;
-    return { text: line.slice(token.offset, end), type: token.type, language: token.language };
-  });
-}
-
-function tokenizeLines(monaco, lines) {
-  return Array.from(monaco.editor.tokenize(lines.join('\n'), 'vue'), (tokens, index) => lineTokens(tokens, lines[index]));
-}
+const { loadRealMonaco, tokenizeLines, languagesOf, waitForEmbeddedGrammars } = require('./monaco-helpers');
 
 // Wraps `body` in a template block, tokenizes it, and returns the tokens of the body lines.
 function tokenizeTemplate(monaco, body) {
@@ -43,30 +32,17 @@ function tokenAt(line, text, after) {
     }
     offset = end;
   }
-  throw new Error('unreachable');
 }
 
 function typeOf(line, text, after) {
   return tokenAt(line, text, after).type;
 }
 
-function languagesOf(line) {
-  return [...new Set(line.map(token => token.language))];
-}
-
-async function waitForGrammars(monaco) {
-  const lines = ['<script>', 'const a = 1', '</script>', '<style>', '.a {}', '</style>'];
-  await waitFor(() => {
-    const tokens = tokenizeLines(monaco, lines);
-    return tokens[1].some(token => token.type === 'keyword.ts') && tokens[4].some(token => token.type === 'tag.css');
-  }, 'the embedded grammars');
-}
-
 test('vue template expressions', async t => {
   const page = await loadRealMonaco();
   t.after(() => page.close());
   const { monaco } = page;
-  await waitForGrammars(monaco);
+  await waitForEmbeddedGrammars(monaco);
 
   await t.test('an interpolation is TypeScript between delimiter braces', () => {
     const [line] = tokenizeTemplate(monaco, ['  <span>{{ group.label }}</span>']);
@@ -263,7 +239,7 @@ test('template expressions take the Prism colors of their TypeScript tokens', as
   const page = await loadRealMonaco();
   t.after(() => page.close());
   const { monaco, window } = page;
-  await waitForGrammars(monaco);
+  await waitForEmbeddedGrammars(monaco);
   const tokens = {
     keyword: { foreground: '#111111', fontStyle: '' },
     punctuation: { foreground: '#222222', fontStyle: '' },

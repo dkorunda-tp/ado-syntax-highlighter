@@ -1,19 +1,15 @@
 // Runs monaco_bridge.js against the real monaco-editor 0.29 build, the API range ADO ships.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { VUE_PATH, createViewerHost, loadRealMonaco, waitFor } = require('./monaco-helpers');
-
-// The tokens of one line with their text. Monaco merges neighbors of the same type, so a quoted value is one token.
-function lineTokens(tokens, line) {
-  return Array.from(tokens, (token, index) => {
-    const end = index + 1 < tokens.length ? tokens[index + 1].offset : line.length;
-    return { text: line.slice(token.offset, end), type: token.type, language: token.language };
-  });
-}
-
-function tokenizeLines(monaco, lines) {
-  return Array.from(monaco.editor.tokenize(lines.join('\n'), 'vue'), (tokens, index) => lineTokens(tokens, lines[index]));
-}
+const {
+  VUE_PATH,
+  createViewerHost,
+  loadRealMonaco,
+  waitFor,
+  tokenizeLines,
+  languagesOf,
+  waitForEmbeddedGrammars
+} = require('./monaco-helpers');
 
 function typesOf(line) {
   return line.map(token => token.type);
@@ -23,21 +19,8 @@ function visibleTypesOf(line) {
   return typesOf(line.filter(token => token.text.trim()));
 }
 
-function languagesOf(line) {
-  return [...new Set(line.map(token => token.language))];
-}
-
 function tokenOf(line, text) {
   return line.find(token => token.text === text);
-}
-
-// Embedded grammars load on first use, so tokenize until TypeScript, CSS and SCSS all answer.
-async function waitForEmbeddedGrammars(monaco) {
-  const lines = ['<script>', 'const a = 1', '</script>', '<style>', '.a {}', '</style>', '<style lang="scss">', '$a: 1px;', '</style>'];
-  await waitFor(() => {
-    const tokens = tokenizeLines(monaco, lines);
-    return typesOf(tokens[1]).includes('keyword.ts') && typesOf(tokens[4]).includes('tag.css') && tokens[7].some(token => token.type.endsWith('.scss'));
-  }, 'the embedded grammars');
 }
 
 test('grammar', async t => {

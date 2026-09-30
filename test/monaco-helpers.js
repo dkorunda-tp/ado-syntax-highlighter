@@ -256,6 +256,32 @@ async function waitFor(check, what, errors = []) {
   }
 }
 
+// The tokens of one line with their text. Monaco merges neighbors of the same type, so a quoted value is one token.
+function lineTokens(tokens, line) {
+  return Array.from(tokens, (token, index) => {
+    const end = index + 1 < tokens.length ? tokens[index + 1].offset : line.length;
+    return { text: line.slice(token.offset, end), type: token.type, language: token.language };
+  });
+}
+
+function tokenizeLines(monaco, lines) {
+  return Array.from(monaco.editor.tokenize(lines.join('\n'), 'vue'), (tokens, index) => lineTokens(tokens, lines[index]));
+}
+
+function languagesOf(line) {
+  return [...new Set(line.map(token => token.language))];
+}
+
+// Embedded grammars load on first use, so tokenize until TypeScript, CSS and SCSS all answer.
+async function waitForEmbeddedGrammars(monaco) {
+  const lines = ['<script>', 'const a = 1', '</script>', '<style>', '.a {}', '</style>', '<style lang="scss">', '$a: 1px;', '</style>'];
+  await waitFor(() => {
+    const tokens = tokenizeLines(monaco, lines);
+    return tokens[1].some(token => token.type === 'keyword.ts') && tokens[4].some(token => token.type === 'tag.css')
+      && tokens[7].some(token => token.type.endsWith('.scss'));
+  }, 'the embedded grammars');
+}
+
 module.exports = {
   THEME_EVENT,
   THEME_REQUEST_EVENT,
@@ -267,5 +293,8 @@ module.exports = {
   loadBridge,
   vueLanguageCalls,
   loadRealMonaco,
-  waitFor
+  waitFor,
+  tokenizeLines,
+  languagesOf,
+  waitForEmbeddedGrammars
 };
