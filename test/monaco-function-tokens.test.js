@@ -145,6 +145,14 @@ test('function calls', async t => {
     }
   });
 
+  // Arguments that end at a line end must leave the attribute, or a later `),` would return to it.
+  await t.test('csharp: attribute arguments that end at a line end leave the attribute', () => {
+    const lines = tokenizeLines(monaco, ['[Foo(', '    1)', ']', 'Call(Run(1), Walk(2));'], 'csharp');
+
+    assert.equal(typeOf(lines[0], 'Foo'), 'identifier.cs');
+    assert.equal(typeOf(lines[3], 'Walk'), 'function.cs');
+  });
+
   await t.test('csharp: property access without a call stays identifier', () => {
     const [line] = tokenize(monaco, 'var v = a.b.c; d = e;', 'csharp');
 
@@ -179,6 +187,7 @@ const SCRIPT_CALLS = [
   'const n = Number(x) + String(y).length + Boolean(z) + Foo() + Date.now() + TypeError(e);',
   'const b = new Foo(); const c = new Bar.Baz(1); const d = new foo(); const e = new Intl.NumberFormat(\'en-US\').format(1);',
   'const cap = load<Cap>(\'x\'); const m = new Map<string, number>(); api.get<Cap[]>(\'/caps\'); Foo<T>();',
+  'const nested = load<Map<string, Cap>>(\'x\') + api.get<Array<Record<string, Cap>>>(1);',
   'if (a) { for (;;) {} while (b) {} switch (c) {} } try { x() } catch (e) { y() }',
   'return typeof (y) === void (0) ? super.render() : this.save(URL(u), MAX_COUNT(2));',
   'handler.call(this, e); fn.apply(null, args); cb.bind(this);',
@@ -203,6 +212,7 @@ const CSHARP_CALLS = [
   '[Route("api/[controller]")]',
   '[Authorize][HttpGet("{id}")]',
   '[Foo(typeof(Bar), Name = nameof(Baz))]',
+  '[1, Run()]',
   'public IActionResult Get([FromQuery(Name = "id")] int id, [FromRoute(Name = "x")] string x) => Ok(id);',
   'public record CapDto(int Id, string Name);',
   'public class CapsController(IMediator mediator) : ControllerBase',
@@ -393,6 +403,29 @@ test('a bridge that starts first replaces each grammar after ADO\'s loads on fir
 });
 
 test('a TypeScript model that ADO tokenized first is tokenized again with function tokens', async t => {
+  const page = await loadRealMonaco({ bridge: 'none' });
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const host = window.document.createElement('div');
+  window.document.body.appendChild(host);
+  const model = monaco.editor.createModel('const t = formatDollars(x)', 'typescript');
+  monaco.editor.create(host, { model });
+  await waitFor(() => hasGrammar(monaco, 'typescript'), 'ADO\'s TypeScript grammar');
+  // Tokenizes the model with ADO's grammar, so the model holds ADO's tokens when the copy registers.
+  monaco.editor.colorizeModelLine(model, 1);
+
+  page.startBridge();
+  const functionColor = { function: { foreground: '#654321', fontStyle: '' } };
+  page.sendTheme({ vs: functionColor, 'vs-dark': functionColor });
+  monaco.editor.setTheme('vs');
+  await waitForCallTokens(monaco, ['typescript']);
+  await settle(window);
+
+  const pieces = coloredPieces(window, monaco.editor.colorizeModelLine(model, 1));
+  assert.equal(pieces.find(piece => piece.text === 'formatDollars')?.color, '#654321', JSON.stringify(pieces));
+});
+
+test('a TypeScript model opened after the bridge starts gets function tokens', async t => {
   const page = await loadRealMonaco();
   t.after(() => page.close());
   const { monaco, window } = page;
@@ -453,6 +486,43 @@ test('a bridge that starts after Monaco but before the first use replaces the gr
   await settle(window);
 
   for (const language of LANGUAGES) assert.ok(hasCallTokens(monaco, language), language);
+});
+
+test('a late start with a TypeScript model loads no other grammar until its first use', async t => {
+  const page = await loadRealMonaco({ bridge: 'none' });
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const adoLoads = recordAdoGrammarLoads(monaco);
+  monaco.editor.createModel('', 'typescript');
+  await waitFor(() => adoLoads.includes('typescript'), 'ADO\'s TypeScript grammar');
+
+  page.startBridge();
+  await waitForCallTokens(monaco, ['typescript']);
+  await settle(window);
+  assert.deepEqual(adoLoads, ['typescript']);
+
+  LANGUAGES.forEach(language => hasCallTokens(monaco, language));
+  await waitFor(() => LANGUAGES.every(language => adoLoads.includes(language)), 'ADO\'s grammars');
+  await settle(window);
+  for (const language of LANGUAGES) assert.ok(hasCallTokens(monaco, language), language);
+});
+
+test('an onLanguage that throws for one language leaves the others their copies', async t => {
+  const page = await loadRealMonaco({ bridge: 'none' });
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  const onLanguage = monaco.languages.onLanguage;
+  monaco.languages.onLanguage = (languageId, callback) => {
+    if (languageId === 'typescript') throw new Error('rejected');
+    return onLanguage(languageId, callback);
+  };
+
+  assert.doesNotThrow(() => page.startBridge());
+  LANGUAGES.forEach(language => hasCallTokens(monaco, language));
+  await waitForCallTokens(monaco, ['javascript', 'csharp']);
+  await settle(window);
+
+  assert.equal(hasCallTokens(monaco, 'typescript'), false);
 });
 
 test('a colorize that rejects, as when ADO\'s grammar fails to load, registers no copy', async t => {

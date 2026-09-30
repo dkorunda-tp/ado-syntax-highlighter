@@ -161,9 +161,11 @@
   /*
    * The typescript, javascript and csharp grammars below are copied from monaco-editor 0.29.1
    * (esm/vs/basic-languages). The only change is the parts marked "Added": a call is a function token, where
-   * Prism's grammar of the same language shows a function.
+   * Prism's grammar of the same language shows a function. The patterns and word lists of the Added parts are
+   * taken from the bundled Prism 1.30.0 (prism/prism.js), under the same MIT license.
    *
    * Copyright (c) 2016 - present Microsoft Corporation
+   * Prism: Copyright (c) 2012 Lea Verou
    *
    * Permission is hereby granted, free of charge, to any person obtaining a copy
    * of this software and associated documentation files (the "Software"), to deal
@@ -770,7 +772,7 @@
       if (usedLanguages.has(languageId)) {
         registerAfterAdoGrammar();
       } else {
-        languages.onLanguage(languageId, guarded(registerAfterAdoGrammar));
+        guarded(() => languages.onLanguage(languageId, guarded(registerAfterAdoGrammar)))();
       }
     }
   }
