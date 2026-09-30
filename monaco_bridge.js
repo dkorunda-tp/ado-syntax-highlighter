@@ -15,6 +15,8 @@
   const FONT_STYLES = ['', 'italic', 'bold', 'italic bold'];
   // ADO can reset a model's language. The bridge sets vue at most this many times per model, then ADO keeps its choice.
   const MAX_LANGUAGE_APPLIES = 3;
+  // The shortest time between two theme applies after ADO rewrites Monaco's color stylesheet.
+  const THEME_RESTORE_INTERVAL_MS = 250;
 
   // Prism token type -> Monaco token types. A theme rule matches by the longest token prefix, so the more
   // specific rules of the built-in themes are listed too, or they would keep their own colors.
@@ -672,6 +674,12 @@
   let themeRedrawPending = false;
   const editors = new Set();
   const languageApplies = new WeakMap();
+  let themeObserver = null;
+  const watchedHeads = new WeakSet();
+  const watchedStylesheets = new WeakSet();
+  let lastThemeRestore = 0;
+  let themeRestoreTimer = null;
+  let unrestorableThemeCss = null;
 
   function hasFunctions(object, names) {
     return !!object && names.every(name => typeof object[name] === 'function');
@@ -740,6 +748,55 @@
     }
   }
 
+  // ADO can rewrite Monaco's color stylesheet with the plain vs palette, for example when the single-file view
+  // switches files, through a path that calls no public Monaco function. The bridge watches that stylesheet and
+  // applies the theme again when it lacks a Prism color of the active theme: at most once per interval, and not
+  // again for stylesheet text that an apply did not change.
+  function themeStylesheet() {
+    const sheets = document.querySelectorAll('style.monaco-colors');
+    return sheets[sheets.length - 1] || null;
+  }
+
+  function holdsPrismColors() {
+    const tokens = themePayload?.[getActiveThemeName()];
+    const sheet = themeStylesheet();
+    if (!tokens || !sheet) return true;
+    const css = sheet.textContent.toLowerCase();
+    return Object.values(tokens).every(style => css.includes(style.foreground.toLowerCase()));
+  }
+
+  function restoreTheme() {
+    if (holdsPrismColors() || themeStylesheet().textContent === unrestorableThemeCss) return;
+    const wait = lastThemeRestore + THEME_RESTORE_INTERVAL_MS - Date.now();
+    if (wait > 0) {
+      themeRestoreTimer ??= setTimeout(guarded(() => {
+        themeRestoreTimer = null;
+        restoreTheme();
+      }), wait);
+      return;
+    }
+    lastThemeRestore = Date.now();
+    applyTheme();
+    unrestorableThemeCss = holdsPrismColors() ? null : themeStylesheet().textContent;
+  }
+
+  function watchThemeStylesheet() {
+    if (typeof MutationObserver !== 'function' || !document.head) return;
+    themeObserver ??= new MutationObserver(guarded(() => {
+      watchThemeStylesheet();
+      restoreTheme();
+    }));
+    if (!watchedHeads.has(document.head)) {
+      watchedHeads.add(document.head);
+      themeObserver.observe(document.head, { childList: true });
+    }
+    for (const sheet of document.querySelectorAll('style.monaco-colors')) {
+      if (watchedStylesheets.has(sheet)) continue;
+      watchedStylesheets.add(sheet);
+      themeObserver.observe(sheet, { childList: true, characterData: true, subtree: true });
+    }
+  }
+
   // Redefining the built-in names keeps ADO's light or dark choice and its editor and diff colors.
   function applyTheme() {
     if (!monaco || !themePayload || typeof monaco.editor.defineTheme !== 'function') return;
@@ -754,6 +811,7 @@
       }))();
     }
     redrawActiveTheme();
+    guarded(watchThemeStylesheet)();
   }
 
   function getModelLanguage(model) {
@@ -901,6 +959,7 @@
     const payload = parseThemePayload(event.detail);
     if (!payload) return;
     themePayload = payload;
+    unrestorableThemeCss = null;
     applyTheme();
   }));
   guarded(watchForMonaco)();
