@@ -225,8 +225,9 @@
       ]],
       [new RegExp(`[a-zA-Z_$][\\w$]*${call}`), callToken('callKeywords')],
       // A name that is assigned a function, as Prism's function-variable rule reads it: `x = (...) =>`,
-      // `key: async () =>`, `x = a =>` or `x = function`. Prism checks it before keywords and constants.
-      [/[a-zA-Z_$][\w$]*(?=\s*[=:]\s*(?:async\s*)?(?:function\b|(?:\((?:[^()]|\([^()]*\))*\)|[a-zA-Z_$][\w$]*)\s*=>))/, 'function'],
+      // `key: async () =>`, `x = a =>` or `x = function`. Prism checks it before keywords and constants, and after
+      // strings and comments, so the parameters hold no quote, backtick or comment.
+      [/[a-zA-Z_$][\w$]*(?=\s*[=:]\s*(?:async\s*)?(?:function\b|(?:\((?:(?!\/[\/*])[^()'"`]|\((?:(?!\/[\/*])[^()'"`])*\))*\)|[a-zA-Z_$][\w$]*)\s*=>))/, 'function'],
       [/(?:false|true)(?![\w$])/, 'boolean'],
       // Prism highlights a .vue script block as a whole and sees a generic call that spans lines. Monaco reads one
       // line, so the Vue compiler macros, which are always calls, are calls before `<`.
@@ -535,15 +536,6 @@
         // Monaco's own grammar; split, its `//` would start a comment.
         [/(?=[=><!~?:&|+\-*\/\^%]*(?:\/\/|\/\*))@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
         [/\?\?=?/, 'operator'],
-        // A `:` that starts the format of an interpolation hole, as in {date:yyyy-MM-dd}, where Prism reads the
-        // format as one format-string token with no operator.
-        [/:(?=[^}"()]*\})/, {
-          cases: {
-            '$S2==interpolatedstring': { token: 'delimiter', next: '@interpolationFormat' },
-            '$S2==litinterpstring': { token: 'delimiter', next: '@interpolationFormat' },
-            '@default': 'delimiter'
-          }
-        }],
         [/::?|\?/, 'delimiter'],
         [/[=><!~&|+\-*\/\^%]+/, 'operator'],
         [/[0-9_]*\.[0-9_]+([eE][\-+]?\d+)?[fFdD]?/, 'number.float'],
@@ -580,6 +572,17 @@
       ],
       // Added. The format of an interpolation hole: its symbols keep the delimiter token, and the closing brace is
       // left to the hole.
+      // Added. The hole of an interpolated string: root, and before it a `:` that starts the format, as in
+      // {date:yyyy-MM-dd} or {date://yyyy}, where Prism reads the format as one format-string token with no
+      // operator. The state names are the ones the original grammar pushes, so its `$S2` checks still hold.
+      'root.interpolatedstring': [
+        [/:(?=[^}"()]*\})/, { token: 'delimiter', next: '@interpolationFormat' }],
+        { include: '@root' }
+      ],
+      'root.litinterpstring': [
+        [/:(?=[^}"()]*\})/, { token: 'delimiter', next: '@interpolationFormat' }],
+        { include: '@root' }
+      ],
       interpolationFormat: [
         [/(?=\})/, '', '@pop'],
         [/[=><!~&|+\-*\/\^%]+/, 'delimiter'],
@@ -697,6 +700,9 @@
         // Added: 'function' in place of 'attribute.value' for url-prefix and url, here and in term.
         ['(url-prefix)(\\()', ['function', { token: 'delimiter.parenthesis', next: '@urldeclaration' }]],
         ['(url)(\\()', ['function', { token: 'delimiter.parenthesis', next: '@urldeclaration' }]],
+        // Added: a function in an at-rule header, such as calc( in @supports or style( in @container. A
+        // pseudo-class such as :not( is read with its selector by selectorname and stays a tag.
+        ['@identifier(?=\\()', 'function'],
         { include: '@selectorname' },
         ['[\\*]', 'tag'],
         ['[>\\+,]', 'delimiter'],

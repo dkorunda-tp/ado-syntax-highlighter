@@ -194,7 +194,10 @@ const SCRIPT_CALLS = [
   'const handler = (e) => emit(e); const load = async () => fetch(x); const fn = function (a) { return a; };',
   'export default { props: { items: { type: Array, default: () => [] } }, methods: { save: async (id) => post(id), close: x => x } };',
   'this.onChange = (v) => v; obj.run = function () {}; let cb: Handler = (a) => a; x.y = z => z; const k = async x => x;',
-  'const MAX = () => 1; const Pick = ({ a }) => a; const t = (a, (b)) => 1; if (a == function () {}) {} x += () => 1;'
+  'const MAX = () => 1; const Pick = ({ a }) => a; const t = (a, (b)) => 1; if (a == function () {}) {} x += () => 1;',
+  // Prism tokenizes strings and comments first, so its function-variable lookahead stops at them.
+  'const value = (/* ) => */ 1); const format = (value = \'\') => value; const setMode = (mode: \'light\' | \'dark\') => mode;',
+  'const tpl = (a = `x`) => a; const q = (a = "b") => a; const w = (a /* n */) => a; const e = (a = (b)) => a;'
 ];
 
 const CSHARP_CALLS = [
@@ -251,6 +254,7 @@ const CSHARP_OPERATORS = [
   'using ReviewEntity = TopProviderDb.Lib.Models.QualityReview.Review;',
   'var presented = header[prefix.Length..].Trim() + s[..n] + s[a..b];',
   'var label = $"{createdAt:yyyy-MM-dd} {total:N2} {(ok ? "yes" : "no")} {x,10:C} {a - b}";',
+  'var s = $"{date://yyyy-MM-dd}" + $@"{d://HH-mm}";',
   'using Lookup = System.Collections.Generic.Dictionary<string, object>;',
   'List <int> items = new(); var z = Get <T> ();',
   '        return new ServerSidePaginatedResult<QualityReviewQueueEntryModel>'
@@ -381,7 +385,9 @@ const STYLE_CALLS = [
   '.c:not(.d):nth-child(2n+1) { color: red; }',
   '@media (max-width: 600px) { .e { color: hsl(120deg 50% 50%); } }',
   '.f { color: rgba(var(--c), 0.5); content: attr(data-x); grid-template-columns: repeat(3, minmax(0, 1fr)); }',
-  '.g::before { filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.2)); font-family: "Roboto", sans-serif; }'
+  '.g::before { filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.2)); font-family: "Roboto", sans-serif; }',
+  '@supports (width: calc(100% - 1px)) { .h { color: red; } }',
+  '@container style(--theme: dark) { .i :is(.j, .k) { color: blue; } }'
 ];
 
 const SCSS_CALLS = [
@@ -402,9 +408,10 @@ test('a css or scss function name has the function color where Prism shows a fun
   await settle(page.window);
   const functionColored = type => type.startsWith('function.') || type === 'meta.scss';
 
-  // Two scss differences stay (parent decision D6): Prism's scss grammar gives url its own url type where Monaco's
-  // meta token shows the function color, and reads the pseudo-class of a selector with parentheses as a function.
-  const scssCorpus = [...STYLE_CALLS.filter(line => !/url\(|:not\(/.test(line)), ...SCSS_CALLS];
+  // The scss grammar is not copied (parent decision D6), so three scss differences stay: Prism's scss grammar gives
+  // url its own url type where Monaco's meta token shows the function color, reads the pseudo-class of a selector
+  // with parentheses as a function, and shows functions in at-rule headers, which Monaco's scss grammar reads as tags.
+  const scssCorpus = [...STYLE_CALLS.filter(line => !/url\(|:not\(|^@/.test(line)), ...SCSS_CALLS];
   for (const [language, corpus] of [['css', STYLE_CALLS], ['scss', scssCorpus]]) {
     const mismatches = [];
     tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
@@ -424,8 +431,8 @@ test('a css or scss function name has the function color where Prism shows a fun
   }
 });
 
-// Monaco's own css grammar on the left, the copy on the right: only a function name changes, from the
-// attribute.value token that it shared with its `(`, to function.
+// Monaco's own css grammar on the left, the copy on the right: only a function name changes, to function, from
+// the attribute.value token that it shared with its `(`, or from tag in an at-rule header.
 test('every css token other than a function name is the same as in Monaco\'s own grammar', async t => {
   const page = await loadRealMonaco({ bridge: 'none' });
   t.after(() => page.close());
@@ -448,7 +455,7 @@ test('every css token other than a function name is the same as in Monaco\'s own
         if (token.type === oldTypes[char]) continue;
         const where = `line ${index + 1}, "${token.text}" was ${oldTypes[char]}: ${lines[index]}`;
         assert.equal(token.type, 'function.css', where);
-        assert.equal(oldTypes[char], 'attribute.value.css', where);
+        assert.match(oldTypes[char], /^(?:attribute\.value|tag)\.css$/, where);
         assert.match(lines[index].slice(offset + token.text.length), /^\(/, where);
         names++;
       }
