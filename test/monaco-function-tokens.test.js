@@ -477,6 +477,20 @@ test('a bridge that starts after the first use replaces ADO\'s loaded grammars, 
   await waitForCallTokens(monaco);
 });
 
+test('after a late start, a .vue model opened later embeds the TypeScript copy that was used before with no model', async t => {
+  const page = await loadRealMonaco({ bridge: 'none' });
+  t.after(() => page.close());
+  const { monaco, window } = page;
+  await waitFor(() => hasGrammar(monaco, 'typescript'), 'ADO\'s TypeScript grammar');
+
+  page.startBridge();
+  await settle(window);
+  const model = monaco.editor.createModel('<script setup lang="ts">\nconst v = formatDollars(1)\n</script>', 'vue');
+
+  await waitFor(() => tokenizeLines(monaco, model.getLinesContent())[1].some(token => token.type === 'function.ts'), 'function tokens in the vue script');
+  assert.equal(typeOf(tokenizeLines(monaco, model.getLinesContent())[1], 'formatDollars'), 'function.ts');
+});
+
 test('a bridge that starts after Monaco but before the first use replaces the grammars that load later', async t => {
   const page = await loadRealMonaco({ bridge: 'none' });
   t.after(() => page.close());
