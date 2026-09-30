@@ -482,7 +482,9 @@
     generic: /<(?:[^<>;=+\-*\/%&|^]|<(?:[^<>;=+\-*\/%&|^]|<[^<>;=+\-*\/%&|^]*>)*>)*>/,
     // The first attribute after `[`, as Prism reads one: an optional target, a name, optional generic arguments and
     // arguments, then `,` or `]` on the same line.
-    attributeHead: /[ \t]*(?:[a-z]+[ \t]*:[ \t]*)?@?[a-zA-Z_][\w.]*(?:[ \t]*@generic)?[ \t]*(?:\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))?[ \t]*[,\]]/,
+    attributeHead: /[ \t]*(?:[a-z]+[ \t]*:[ \t]*)?@?[a-zA-Z_][\w.]*(?:[ \t]*@generic)?[ \t]*(?:\((?:@attributeText|\((?:@attributeText|\((?:@attributeText)*\))*\))*\))?[ \t]*[,\]]/,
+    // A string, a character or any other character but a parenthesis, in attribute arguments.
+    attributeText: /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^()"']/,
     tokenizer: {
       root: [
         // Added.
@@ -525,6 +527,15 @@
         // are punctuation (see typeArguments).
         [/[<>](?!@symbols)/, 'operator'],
         [/\?\?=?/, 'operator'],
+        // A `:` that starts the format of an interpolation hole, as in {date:yyyy-MM-dd}, where Prism reads the
+        // format as one format-string token with no operator.
+        [/:(?=[^}"()]*\})/, {
+          cases: {
+            '$S2==interpolatedstring': { token: 'delimiter', next: '@interpolationFormat' },
+            '$S2==litinterpstring': { token: 'delimiter', next: '@interpolationFormat' },
+            '@default': 'delimiter'
+          }
+        }],
         [/::?|\?/, 'delimiter'],
         [/[=><!~&|+\-*\/\^%]+/, 'operator'],
         [/[0-9_]*\.[0-9_]+([eE][\-+]?\d+)?[fFdD]?/, 'number.float'],
@@ -554,9 +565,17 @@
         [/\.\./, { token: 'operator', next: '@pop' }],
         [/\./, 'delimiter'],
         // Added.
-        [/[ \t]+(?=@generic\s*\()/, ''],
+        // Type arguments after a space, before `(` or a declared name, as in Get <T>() or List <int> items.
+        [/[ \t]+(?=@generic\s*(?:\(|@?[a-zA-Z_]))/, ''],
         [/(?=@generic)</, { token: 'delimiter.angle', switchTo: '@typeArguments' }],
         ['', '', '@pop']
+      ],
+      // Added. The format of an interpolation hole: its symbols keep the delimiter token, and the closing brace is
+      // left to the hole.
+      interpolationFormat: [
+        [/(?=\})/, '', '@pop'],
+        [/[=><!~&|+\-*\/\^%]+/, 'delimiter'],
+        { include: '@root' }
       ],
       // Added. The type arguments right after a name, such as <string, List<int>>, where Prism reads the angle
       // brackets as punctuation.
@@ -595,7 +614,9 @@
       namespace: [
         { include: '@whitespace' },
         [/[A-Z]\w*/, 'namespace'],
-        // Added: `=` of a using alias is an operator, as in Prism; it was part of this 'delimiter' rule.
+        // Added: the type arguments of a using alias, and its `=`, which is an operator as in Prism and was part of
+        // this 'delimiter' rule.
+        [/(?=@generic)</, { token: 'delimiter.angle', next: '@typeArguments' }],
         [/=/, 'operator'],
         [/\./, 'delimiter'],
         ['', '', '@pop']

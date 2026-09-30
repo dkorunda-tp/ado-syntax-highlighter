@@ -205,6 +205,7 @@ const CSHARP_CALLS = [
   '    [Authorize(Roles = "Admin"), Produces(typeof(Foo))]',
   '[Route("api/[controller]")]',
   '[Authorize][HttpGet("{id}")]',
+  '[Route("api/)")]',
   '[Foo(typeof(Bar), Name = nameof(Baz))]',
   '[1, Run()]',
   'Take([item + Run()]); Take(1, [item + Run()]); Take([a, b]);',
@@ -244,6 +245,9 @@ const CSHARP_OPERATORS = [
   'var t = flag ? true : false; bool b = !(a > 0); var q = items.Where(i => i.Ok).Select(i => i.Id * 2 - 1 / 3 % 4);',
   'using ReviewEntity = TopProviderDb.Lib.Models.QualityReview.Review;',
   'var presented = header[prefix.Length..].Trim() + s[..n] + s[a..b];',
+  'var label = $"{createdAt:yyyy-MM-dd} {total:N2} {(ok ? "yes" : "no")} {x,10:C} {a - b}";',
+  'using Lookup = System.Collections.Generic.Dictionary<string, object>;',
+  'List <int> items = new(); var z = Get <T> ();',
   '        return new ServerSidePaginatedResult<QualityReviewQueueEntryModel>'
 ];
 
