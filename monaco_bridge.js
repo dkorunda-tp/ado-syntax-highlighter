@@ -160,8 +160,8 @@
 
   /*
    * The typescript, javascript and csharp grammars below are copied from monaco-editor 0.29.1
-   * (esm/vs/basic-languages). The only change is the rules marked "Added": an identifier followed by `(` is a
-   * function token.
+   * (esm/vs/basic-languages). The only change is the parts marked "Added": a call is a function token, where
+   * Prism's grammar of the same language shows a function.
    *
    * Copyright (c) 2016 - present Microsoft Corporation
    *
@@ -183,6 +183,119 @@
    * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    * SOFTWARE.
    */
+
+  // Added. The call rules of the typescript and javascript copies follow Prism's typescript and javascript
+  // grammars. A name is a call before `(`, and in TypeScript also before `<...>(`, `.call(`, `.apply(` or
+  // `.bind(`. It is not a call where Prism shows a keyword, a constant (capitals only) or, in JavaScript, a
+  // built-in class. After `.` fewer names are keywords, and after `new`, `class` and the like a name is a class.
+  // A name that is not a call keeps the token of Monaco's own grammar.
+  const SCRIPT_NAME_TOKEN = { cases: { '~[A-Z].*': 'type.identifier', '@keywords': 'keyword', '@default': 'identifier' } };
+
+  function scriptCallRules({ classKeywords, typescript = false, classNames = null }) {
+    const call = typescript ? '(?=\\s*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\\s*|\\.\\s*(?:apply|bind|call)\\s*)?\\()' : '(?=\\s*\\()';
+    const callToken = keywordList => ({
+      cases: {
+        [`@${keywordList}`]: SCRIPT_NAME_TOKEN,
+        ...(classNames ? { [`~${classNames}`]: SCRIPT_NAME_TOKEN } : {}),
+        '~[A-Z](?:[A-Z_]|\\dx?)*': SCRIPT_NAME_TOKEN,
+        '@default': 'function'
+      }
+    });
+    const keywordToken = { cases: { '@keywords': 'keyword', '@default': 'identifier' } };
+    return [
+      typescript
+        ? [new RegExp(`(${classKeywords})([ \\t]+)([a-zA-Z_$][\\w$]*)`), [keywordToken, '', SCRIPT_NAME_TOKEN]]
+        : [new RegExp(`(${classKeywords})([ \\t]+)(?=[\\w$])`), [keywordToken, { token: '', next: '@className' }]],
+      [new RegExp(`(\\.)([ \\t]*)([a-zA-Z_$][\\w$]*)${call}`), ['delimiter', '', callToken('memberCallKeywords')]],
+      [new RegExp(`[a-zA-Z_$][\\w$]*${call}`), callToken('callKeywords')]
+    ];
+  }
+
+  // The tokenizer that the typescript and javascript grammars share.
+  const scriptTokenizer = {
+    root: [[/[{}]/, 'delimiter.bracket'], { include: 'common' }],
+    common: [
+      [/[a-z_$][\w$]*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
+      [/[A-Z][\w\$]*/, 'type.identifier'],
+      { include: '@whitespace' },
+      [/\/(?=([^\\\/]|\\.)+\/([dgimsuy]*)(\s*)(\.|;|,|\)|\]|\}|$))/, { token: 'regexp', bracket: '@open', next: '@regexp' }],
+      [/[()\[\]]/, '@brackets'],
+      [/[<>](?!@symbols)/, '@brackets'],
+      [/!(?=([^=]|$))/, 'delimiter'],
+      [/@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
+      [/(@digits)[eE]([\-+]?(@digits))?/, 'number.float'],
+      [/(@digits)\.(@digits)([eE][\-+]?(@digits))?/, 'number.float'],
+      [/0[xX](@hexdigits)n?/, 'number.hex'],
+      [/0[oO]?(@octaldigits)n?/, 'number.octal'],
+      [/0[bB](@binarydigits)n?/, 'number.binary'],
+      [/(@digits)n?/, 'number'],
+      [/[;,.]/, 'delimiter'],
+      [/"([^"\\]|\\.)*$/, 'string.invalid'],
+      [/'([^'\\]|\\.)*$/, 'string.invalid'],
+      [/"/, 'string', '@string_double'],
+      [/'/, 'string', '@string_single'],
+      [/`/, 'string', '@string_backtick']
+    ],
+    whitespace: [
+      [/[ \t\r\n]+/, ''],
+      [/\/\*\*(?!\/)/, 'comment.doc', '@jsdoc'],
+      [/\/\*/, 'comment', '@comment'],
+      [/\/\/.*$/, 'comment']
+    ],
+    comment: [
+      [/[^\/*]+/, 'comment'],
+      [/\*\//, 'comment', '@pop'],
+      [/[\/*]/, 'comment']
+    ],
+    jsdoc: [
+      [/[^\/*]+/, 'comment.doc'],
+      [/\*\//, 'comment.doc', '@pop'],
+      [/[\/*]/, 'comment.doc']
+    ],
+    regexp: [
+      [/(\{)(\d+(?:,\d*)?)(\})/, ['regexp.escape.control', 'regexp.escape.control', 'regexp.escape.control']],
+      [/(\[)(\^?)(?=(?:[^\]\\\/]|\\.)+)/, ['regexp.escape.control', { token: 'regexp.escape.control', next: '@regexrange' }]],
+      [/(\()(\?:|\?=|\?!)/, ['regexp.escape.control', 'regexp.escape.control']],
+      [/[()]/, 'regexp.escape.control'],
+      [/@regexpctl/, 'regexp.escape.control'],
+      [/[^\\\/]/, 'regexp'],
+      [/@regexpesc/, 'regexp.escape'],
+      [/\\\./, 'regexp.invalid'],
+      [/(\/)([dgimsuy]*)/, [{ token: 'regexp', bracket: '@close', next: '@pop' }, 'keyword.other']]
+    ],
+    regexrange: [
+      [/-/, 'regexp.escape.control'],
+      [/\^/, 'regexp.invalid'],
+      [/@regexpesc/, 'regexp.escape'],
+      [/[^\]]/, 'regexp'],
+      [/\]/, { token: 'regexp.escape.control', next: '@pop', bracket: '@close' }]
+    ],
+    string_double: [
+      [/[^\\"]+/, 'string'],
+      [/@escapes/, 'string.escape'],
+      [/\\./, 'string.escape.invalid'],
+      [/"/, 'string', '@pop']
+    ],
+    string_single: [
+      [/[^\\']+/, 'string'],
+      [/@escapes/, 'string.escape'],
+      [/\\./, 'string.escape.invalid'],
+      [/'/, 'string', '@pop']
+    ],
+    string_backtick: [
+      [/\$\{/, { token: 'delimiter.bracket', next: '@bracketCounting' }],
+      [/[^\\`$]+/, 'string'],
+      [/@escapes/, 'string.escape'],
+      [/\\./, 'string.escape.invalid'],
+      [/`/, 'string', '@pop']
+    ],
+    bracketCounting: [
+      [/\{/, 'delimiter.bracket', '@bracketCounting'],
+      [/\}/, 'delimiter.bracket', '@pop'],
+      { include: 'common' }
+    ]
+  };
+
   const typescriptLanguage = {
     defaultToken: 'invalid',
     tokenPostfix: '.ts',
@@ -208,89 +321,21 @@
     hexdigits: /[[0-9a-fA-F]+(_+[0-9a-fA-F]+)*/,
     regexpctl: /[(){}\[\]\$\^|\-*+?\.]/,
     regexpesc: /\\(?:[bBdDfnrstvwWn0\\\/]|@regexpctl|c[A-Z]|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})/,
+    // Added. The names that Prism's typescript grammar shows as keywords before `(`, and after `.`.
+    callKeywords: [
+      'abstract', 'as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
+      'declare', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'for', 'function', 'if',
+      'implements', 'import', 'in', 'instanceof', 'interface', 'is', 'keyof', 'let', 'new', 'null', 'of', 'package',
+      'private', 'protected', 'public', 'readonly', 'require', 'return', 'static', 'super', 'switch', 'this', 'throw',
+      'true', 'try', 'typeof', 'undefined', 'var', 'void', 'while', 'with', 'yield'
+    ],
+    memberCallKeywords: ['abstract', 'declare', 'false', 'is', 'keyof', 'readonly', 'require', 'true'],
     tokenizer: {
-      root: [[/[{}]/, 'delimiter.bracket'], { include: 'common' }],
+      ...scriptTokenizer,
+      // Added.
       common: [
-        // Added.
-        [/[a-z_$][\w$]*(?=\s*\()/, { cases: { '@keywords': 'keyword', '@default': 'function' } }],
-        [/[a-z_$][\w$]*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
-        [/[A-Z][\w\$]*/, 'type.identifier'],
-        { include: '@whitespace' },
-        [/\/(?=([^\\\/]|\\.)+\/([dgimsuy]*)(\s*)(\.|;|,|\)|\]|\}|$))/, { token: 'regexp', bracket: '@open', next: '@regexp' }],
-        [/[()\[\]]/, '@brackets'],
-        [/[<>](?!@symbols)/, '@brackets'],
-        [/!(?=([^=]|$))/, 'delimiter'],
-        [/@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
-        [/(@digits)[eE]([\-+]?(@digits))?/, 'number.float'],
-        [/(@digits)\.(@digits)([eE][\-+]?(@digits))?/, 'number.float'],
-        [/0[xX](@hexdigits)n?/, 'number.hex'],
-        [/0[oO]?(@octaldigits)n?/, 'number.octal'],
-        [/0[bB](@binarydigits)n?/, 'number.binary'],
-        [/(@digits)n?/, 'number'],
-        [/[;,.]/, 'delimiter'],
-        [/"([^"\\]|\\.)*$/, 'string.invalid'],
-        [/'([^'\\]|\\.)*$/, 'string.invalid'],
-        [/"/, 'string', '@string_double'],
-        [/'/, 'string', '@string_single'],
-        [/`/, 'string', '@string_backtick']
-      ],
-      whitespace: [
-        [/[ \t\r\n]+/, ''],
-        [/\/\*\*(?!\/)/, 'comment.doc', '@jsdoc'],
-        [/\/\*/, 'comment', '@comment'],
-        [/\/\/.*$/, 'comment']
-      ],
-      comment: [
-        [/[^\/*]+/, 'comment'],
-        [/\*\//, 'comment', '@pop'],
-        [/[\/*]/, 'comment']
-      ],
-      jsdoc: [
-        [/[^\/*]+/, 'comment.doc'],
-        [/\*\//, 'comment.doc', '@pop'],
-        [/[\/*]/, 'comment.doc']
-      ],
-      regexp: [
-        [/(\{)(\d+(?:,\d*)?)(\})/, ['regexp.escape.control', 'regexp.escape.control', 'regexp.escape.control']],
-        [/(\[)(\^?)(?=(?:[^\]\\\/]|\\.)+)/, ['regexp.escape.control', { token: 'regexp.escape.control', next: '@regexrange' }]],
-        [/(\()(\?:|\?=|\?!)/, ['regexp.escape.control', 'regexp.escape.control']],
-        [/[()]/, 'regexp.escape.control'],
-        [/@regexpctl/, 'regexp.escape.control'],
-        [/[^\\\/]/, 'regexp'],
-        [/@regexpesc/, 'regexp.escape'],
-        [/\\\./, 'regexp.invalid'],
-        [/(\/)([dgimsuy]*)/, [{ token: 'regexp', bracket: '@close', next: '@pop' }, 'keyword.other']]
-      ],
-      regexrange: [
-        [/-/, 'regexp.escape.control'],
-        [/\^/, 'regexp.invalid'],
-        [/@regexpesc/, 'regexp.escape'],
-        [/[^\]]/, 'regexp'],
-        [/\]/, { token: 'regexp.escape.control', next: '@pop', bracket: '@close' }]
-      ],
-      string_double: [
-        [/[^\\"]+/, 'string'],
-        [/@escapes/, 'string.escape'],
-        [/\\./, 'string.escape.invalid'],
-        [/"/, 'string', '@pop']
-      ],
-      string_single: [
-        [/[^\\']+/, 'string'],
-        [/@escapes/, 'string.escape'],
-        [/\\./, 'string.escape.invalid'],
-        [/'/, 'string', '@pop']
-      ],
-      string_backtick: [
-        [/\$\{/, { token: 'delimiter.bracket', next: '@bracketCounting' }],
-        [/[^\\`$]+/, 'string'],
-        [/@escapes/, 'string.escape'],
-        [/\\./, 'string.escape.invalid'],
-        [/`/, 'string', '@pop']
-      ],
-      bracketCounting: [
-        [/\{/, 'delimiter.bracket', '@bracketCounting'],
-        [/\}/, 'delimiter.bracket', '@pop'],
-        { include: 'common' }
+        ...scriptCallRules({ classKeywords: 'class|extends|implements|instanceof|interface|new|type', typescript: true }),
+        ...scriptTokenizer.common
       ]
     }
   };
@@ -304,7 +349,40 @@
       'instanceof', 'let', 'new', 'null', 'return', 'set', 'super', 'switch', 'symbol', 'this', 'throw', 'true', 'try',
       'typeof', 'undefined', 'var', 'void', 'while', 'with', 'yield', 'async', 'await', 'of'
     ],
-    typeKeywords: []
+    typeKeywords: [],
+    // Added. The same for Prism's javascript grammar, which the bundled JS Extras plugin changes: more keywords
+    // match after `.`, the built-in classes are class names, a dotted name after `new` is one class name, and a
+    // method token such as `.call` takes the text that would make the name before it a call.
+    callKeywords: [
+      'as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+      'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'from', 'function', 'if', 'implements',
+      'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null', 'of', 'package', 'private', 'protected',
+      'public', 'return', 'static', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'undefined', 'var',
+      'void', 'while', 'with', 'yield'
+    ],
+    memberCallKeywords: [
+      'as', 'await', 'break', 'catch', 'continue', 'default', 'do', 'else', 'export', 'false', 'finally', 'for',
+      'from', 'if', 'import', 'null', 'return', 'switch', 'throw', 'true', 'try', 'undefined', 'while', 'yield'
+    ],
+    tokenizer: {
+      ...scriptTokenizer,
+      // Added.
+      common: [
+        ...scriptCallRules({
+          classKeywords: 'class|extends|implements|instanceof|interface|new',
+          classNames: '(?:(?:Float(?:32|64)|(?:Int|Uint)(?:8|16|32)|Uint8Clamped)?Array|ArrayBuffer|BigInt|Boolean|DataView'
+            + '|Date|Error|Function|Intl|JSON|(?:Weak)?(?:Map|Set)|Math|Number|Object|Promise|Proxy|Reflect|RegExp|String'
+            + '|Symbol|WebAssembly|[A-Z]\\w*Error)'
+        }),
+        ...scriptTokenizer.common
+      ],
+      // Added.
+      className: [
+        [/[a-zA-Z_$][\w$]*/, SCRIPT_NAME_TOKEN],
+        [/\./, 'delimiter'],
+        ['', '', '@pop']
+      ]
+    }
   };
 
   const csharpIdentifierCases = {
@@ -341,11 +419,40 @@
     ],
     symbols: /[=><!~?:&|+\-*\/\^%]+/,
     escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
+    // Added. The call rules follow Prism's csharp grammar: a name right before `(`, or before `<...>(`, is a call,
+    // except the names Prism shows as keywords there. An attribute name, a declared type name (record Dto( or a
+    // primary constructor) and the type after `new` are class names, not calls.
+    callKeywords: [
+      'abstract', 'add', 'alias', 'and', 'as', 'ascending', 'async', 'await', 'base', 'bool', 'break', 'by', 'byte',
+      'case', 'catch', 'char', 'checked', 'class', 'const', 'continue', 'decimal', 'default', 'delegate', 'descending',
+      'do', 'double', 'dynamic', 'else', 'enum', 'event', 'explicit', 'extern', 'false', 'finally', 'fixed', 'float',
+      'for', 'foreach', 'get', 'global', 'goto', 'group', 'if', 'implicit', 'in', 'int', 'interface', 'internal',
+      'into', 'is', 'join', 'let', 'lock', 'long', 'nameof', 'namespace', 'new', 'not', 'notnull', 'null', 'object',
+      'on', 'operator', 'or', 'orderby', 'out', 'override', 'params', 'partial', 'private', 'protected', 'public',
+      'readonly', 'record', 'ref', 'remove', 'return', 'sbyte', 'sealed', 'select', 'set', 'short', 'sizeof',
+      'stackalloc', 'static', 'string', 'struct', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'uint', 'ulong',
+      'unchecked', 'unmanaged', 'unsafe', 'ushort', 'using', 'value', 'var', 'virtual', 'void', 'volatile', 'when',
+      'where', 'while', 'yield'
+    ],
+    generic: /<(?:[^<>;=+\-*\/%&|^]|<(?:[^<>;=+\-*\/%&|^]|<[^<>;=+\-*\/%&|^]*>)*>)*>/,
     tokenizer: {
       root: [
         // Added.
-        [/\@?[a-zA-Z_]\w*(?=\s*\()/, { cases: { ...csharpIdentifierCases, '@default': { token: 'function', next: '@qualified' } } }],
-        [/\@?[a-zA-Z_]\w*/, { cases: { ...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } } }],
+        [/^([ \t]*)(\[)(?=[ \t]*@?[a-zA-Z_])/, ['', { token: 'delimiter.square', next: '@attribute' }]],
+        [/(class|enum|interface|record|struct)([ \t\v\f\r\n]+)(\@?[a-zA-Z_]\w*)/, [
+          { cases: { '@keywords': { token: 'keyword.$1' }, '@default': 'identifier' } },
+          '',
+          { cases: { '@keywords': { token: 'keyword.$3', next: '@qualified' }, '@default': { token: 'identifier', next: '@qualified' } } }
+        ]],
+        [/\@?[a-zA-Z_]\w*(?=\(|\s*@generic\s*\()/, {
+          cases: {
+            '@namespaceFollows': csharpIdentifierCases['@namespaceFollows'],
+            '@callKeywords': { cases: { ...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } } },
+            '@default': { token: 'function', next: '@qualified' }
+          }
+        }],
+        // Added: the `new` case.
+        [/\@?[a-zA-Z_]\w*/, { cases: { new: { token: 'keyword.$0', next: '@constructed' },...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } } }],
         { include: '@whitespace' },
         [/}/, {
           cases: {
@@ -373,10 +480,40 @@
       ],
       qualified: [
         // Added.
-        [/[a-zA-Z_][\w]*(?=\s*\()/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'function' } }],
+        [/[a-zA-Z_][\w]*(?=\(|\s*@generic\s*\()/, {
+          cases: {
+            '@callKeywords': { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } },
+            '@default': 'function'
+          }
+        }],
         [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
         [/\./, 'delimiter'],
         ['', '', '@pop']
+      ],
+      // Added. The type after `new`, such as Foo or Foo.Bar in new Foo.Bar(.
+      constructed: [
+        [/[ \t\v\f\r\n]+/, ''],
+        [/\@?[a-zA-Z_]\w*/, { cases: { '@keywords': { token: 'keyword.$0', switchTo: '@typeName' }, '@default': { token: 'identifier', switchTo: '@typeName' } } }],
+        ['', '', '@pop']
+      ],
+      typeName: [
+        [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
+        [/\./, 'delimiter'],
+        ['', '', '@pop']
+      ],
+      // Added. The names of an attribute such as [HttpGet("{id}")]; its arguments are code. Prism reads a generic
+      // name before `(`, as in [ProducesResponseType<Foo>(200)], as a call.
+      attribute: [
+        [/\@?[a-zA-Z_]\w*(?=\s*@generic\s*\()/, { token: 'function', next: '@qualified' }],
+        [/\@?[a-zA-Z_]\w*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
+        [/\(/, { token: 'delimiter.parenthesis', next: '@attributeArguments' }],
+        [/\]/, { token: 'delimiter.square', next: '@pop' }],
+        { include: '@root' }
+      ],
+      attributeArguments: [
+        [/\(/, { token: 'delimiter.parenthesis', next: '@push' }],
+        [/\)/, { token: 'delimiter.parenthesis', next: '@pop' }],
+        { include: '@root' }
       ],
       namespace: [
         { include: '@whitespace' },

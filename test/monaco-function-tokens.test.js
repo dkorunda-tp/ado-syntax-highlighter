@@ -5,10 +5,45 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { JSDOM, VirtualConsole } = require('jsdom');
 const { loadRealMonaco, waitFor, tokenizeLines, waitForEmbeddedGrammars, renderedColors, coloredPieces } = require('./monaco-helpers');
 
 const LANGUAGES = ['typescript', 'javascript', 'csharp'];
 const POSTFIX = { typescript: 'ts', javascript: 'js', csharp: 'cs' };
+const root = path.join(__dirname, '..');
+
+// The bundled Prism, which the multi-file view uses.
+function loadPrism() {
+  const { window } = new JSDOM('<!doctype html><html><body></body></html>', { runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
+  window.eval(fs.readFileSync(path.join(root, 'prism', 'prism.js'), 'utf8'));
+  return window.Prism;
+}
+
+// Prism's tokens of one line as text ranges, each with its types and aliases and those of the tokens around it.
+function prismPieces(Prism, line, language) {
+  const pieces = [];
+  let offset = 0;
+  const walk = (content, types) => {
+    if (typeof content === 'string') {
+      pieces.push({ start: offset, end: offset + content.length, types });
+      offset += content.length;
+    } else if (Array.isArray(content)) {
+      content.forEach(item => walk(item, types));
+    } else {
+      walk(content.content, [...types, content.type, ...[].concat(content.alias || [])]);
+    }
+  };
+  walk(Prism.tokenize(line, Prism.languages[language]), []);
+  return pieces;
+}
+
+// A call in Prism is a function token. `function-variable` (a name that is assigned a function) is not a call.
+function isPrismCall(pieces, offset) {
+  const { types } = pieces.find(piece => piece.start <= offset && offset < piece.end);
+  return types.includes('function') && !types.includes('function-variable');
+}
+
+const WORD_TOKEN = /^(?:identifier|keyword|type\.identifier|function)(?:\.|$)/;
 
 function tokenize(monaco, text, language) {
   return tokenizeLines(monaco, text.split('\n'), language);
@@ -92,8 +127,7 @@ test('function calls', async t => {
 
     assert.equal(typeOf(line, 'FormatDollars'), 'function.cs');
     assert.equal(typeOf(line, 'c'), 'function.cs');
-    assert.equal(typeOf(line, 'Pad'), 'function.cs', 'whitespace before (');
-    for (const name of ['total', 'x', 'a', 'b']) assert.equal(typeOf(line, name), 'identifier.cs', name);
+    for (const name of ['total', 'x', 'a', 'b', 'Pad']) assert.equal(typeOf(line, name), 'identifier.cs', `${name}; Prism's C# call has no whitespace before (`);
     assert.equal(typeOf(line, 'var'), 'keyword.var.cs');
   });
 
@@ -129,6 +163,69 @@ test('function calls', async t => {
     assert.equal(typeOf(lines[1], 'typeof'), 'keyword.ts');
     assert.equal(typeOf(lines[4], 'formatDollars'), 'function.ts');
   });
+});
+
+// TypeScript syntax is also valid input for the javascript grammars, so one corpus serves both.
+const SCRIPT_CALLS = [
+  'const total = formatDollars(x) + a.b.c(1) + pad (2);',
+  'map.get(k); map.set(k, v); const list = Array.from(items); obj.delete(k); obj.default(1); obj.type(2); obj.is(3);',
+  'p.then(done).catch(fail).finally(end);',
+  'const n = Number(x) + String(y).length + Boolean(z) + Foo() + Date.now() + TypeError(e);',
+  'const b = new Foo(); const c = new Bar.Baz(1); const d = new foo(); const e = new Intl.NumberFormat(\'en-US\').format(1);',
+  'const cap = load<Cap>(\'x\'); const m = new Map<string, number>(); api.get<Cap[]>(\'/caps\'); Foo<T>();',
+  'if (a) { for (;;) {} while (b) {} switch (c) {} } try { x() } catch (e) { y() }',
+  'return typeof (y) === void (0) ? super.render() : this.save(URL(u), MAX_COUNT(2));',
+  'handler.call(this, e); fn.apply(null, args); cb.bind(this);',
+  'class Card extends Base { constructor(name: string) { super(name); } get size() { return this.items.length } set size(v) {} }',
+  'export function formatCapPercent(value: number): string { return `${round(value * 100)}%`; }',
+  'emit(\'update\', value); nextTick(() => focus()); watch(() => props.id, load);',
+  'import(\'./x\').then(m => m.default(1)); require(\'y\'); get(1); set(2); from(3); async (x) => x;',
+  'x.$emit(\'close\'); _private(1); $jq(1); a?.b?.(1); a?.c(2); ...spread(3);'
+];
+
+const CSHARP_CALLS = [
+  'var total = FormatDollars(x) + a.b.C(1) + Pad (2);',
+  'if (a) { } typeof(x); nameof(x); sizeof(int); default(T); using (var s = Open()) { } foreach (var i in Items()) { } lock (x) { }',
+  'var list = new List<int> { 1 }; var foo = new Foo(1); var bar = new Foo.Bar(2); var d = new Dictionary<string, int>();',
+  'services.AddScoped<IFoo, Foo>(); var x = Get<T>(); var y = a.Get<List<int>>(); var z = Get <T> ();',
+  'return string.IsNullOrEmpty(s) ? int.Parse(s) : await Task.FromResult(Count(x));',
+  'Console.WriteLine($"Item {item.Name} of {Format(limit)}");',
+  'public async Task<bool> MatchAsync(T item, int limit = 10) => await Check(item);',
+  '[HttpGet("{id}")]',
+  '[ProducesResponseType<List<CapModel>>(StatusCodes.Status200OK)]',
+  '    [Authorize(Roles = "Admin"), Produces(typeof(Foo))]',
+  '[Route("api/[controller]")]',
+  'public record CapDto(int Id, string Name);',
+  'public class CapsController(IMediator mediator) : ControllerBase',
+  'base.Dispose(); this.Save(); x?.Foo(1); checked(x + 1); from(1); var q = from p in list where p.Ok() select p;',
+  'throw new ArgumentNullException(nameof(item));'
+];
+
+// Each name in the corpus is a function token in Monaco exactly where Prism tokenizes it as a function, one
+// line at a time as the multi-file view highlights a row.
+test('a call has the function token where Prism shows a function', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco } = page;
+  const Prism = loadPrism();
+  LANGUAGES.forEach(language => hasCallTokens(monaco, language));
+  await waitForCallTokens(monaco);
+
+  for (const [language, corpus] of [['typescript', SCRIPT_CALLS], ['javascript', SCRIPT_CALLS], ['csharp', CSHARP_CALLS]]) {
+    const mismatches = [];
+    tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
+      const pieces = prismPieces(Prism, corpus[index], language);
+      let offset = 0;
+      for (const token of tokens) {
+        const monacoCall = token.type.startsWith('function.');
+        if (WORD_TOKEN.test(token.type) && monacoCall !== isPrismCall(pieces, offset)) {
+          mismatches.push(`${token.text} (${token.type}) in: ${corpus[index]}`);
+        }
+        offset += token.text.length;
+      }
+    });
+    assert.deepEqual(mismatches, [], language);
+  }
 });
 
 const CSHARP_SAMPLE = `using System;
@@ -179,15 +276,18 @@ const total = caps.reduce((sum, cap) => sum + cap.amount, 0n) ?? 0x1f;
 /** JSDoc with a call(inside) */
 let x = a?.b?.(1) || await load<Cap>('x');`;
 
-// Monaco's own grammars on the left, the bridge's copies on the right: only a call changes, from identifier to
-// function, and every token keeps its offset. JavaScript and TypeScript share one tokenizer.
+// A call as the copies find one: a name, then `(`, `<...>(` or `.call(` and the like.
+const CALL_FOLLOWS = /^\s*(?:<.*>\s*|\.\s*(?:apply|bind|call)\s*)?\(/;
+
+// Monaco's own grammars on the left, the bridge's copies on the right: only a call changes, from an identifier,
+// a keyword or a type name to function, and every token keeps its offset.
 test('every other token is the same as in Monaco\'s own grammar', async t => {
   const page = await loadRealMonaco({ bridge: 'none' });
   t.after(() => page.close());
   const { monaco } = page;
-  const root = path.join(__dirname, '..');
   const scripts = ['monaco_bridge.js', 'content_script.js'].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
-  const samples = { typescript: `${TYPESCRIPT_SAMPLE}\n${scripts}`, javascript: `${TYPESCRIPT_SAMPLE}\n${scripts}`, csharp: CSHARP_SAMPLE };
+  const scriptSample = [TYPESCRIPT_SAMPLE, ...SCRIPT_CALLS, scripts].join('\n');
+  const samples = { typescript: scriptSample, javascript: scriptSample, csharp: [CSHARP_SAMPLE, ...CSHARP_CALLS].join('\n') };
   await waitFor(() => LANGUAGES.every(language => hasGrammar(monaco, language)), 'Monaco\'s own grammars');
   const before = Object.fromEntries(LANGUAGES.map(language => [language, tokenize(monaco, samples[language], language)]));
 
@@ -206,8 +306,8 @@ test('every other token is the same as in Monaco\'s own grammar', async t => {
         if (token.type === old[tokenIndex].type) return;
         const where = `${language} line ${index + 1}, "${token.text}": ${lines[index]}`;
         assert.equal(token.type, `function.${postfix}`, where);
-        assert.equal(old[tokenIndex].type, `identifier.${postfix}`, where);
-        assert.match(lines[index].slice(line.slice(0, tokenIndex + 1).map(piece => piece.text).join('').length), /^\s*\(/, where);
+        assert.match(old[tokenIndex].type, /^(?:identifier|keyword|type\.identifier)(?:\.|$)/, where);
+        assert.match(lines[index].slice(line.slice(0, tokenIndex + 1).map(piece => piece.text).join('').length), CALL_FOLLOWS, where);
         calls++;
       });
     });
