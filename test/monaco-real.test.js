@@ -8,7 +8,8 @@ const {
   waitFor,
   tokenizeLines,
   languagesOf,
-  waitForEmbeddedGrammars
+  waitForEmbeddedGrammars,
+  renderedColors
 } = require('./monaco-helpers');
 
 function typesOf(line) {
@@ -233,19 +234,6 @@ test('an added .vue file in a plain editor of the single-file view switches to v
   assert.equal(fileEditor.getModel().getModeId(), 'vue');
   assert.equal(widget.getModel().getModeId(), 'plaintext');
 });
-
-// The color Monaco renders for each piece of `text`, read from colorize output and the theme's `.mtkN` rules.
-async function renderedColors(monaco, window, text, language) {
-  const html = await monaco.editor.colorize(text, language, {});
-  const css = [...window.document.querySelectorAll('style.monaco-colors')].map(style => style.textContent).join('\n');
-  const colors = Object.fromEntries([...css.matchAll(/\.mtk(\d+) \{ color: (#[0-9a-f]+); \}/gi)].map(([, id, color]) => [id, color.toLowerCase()]));
-  const container = window.document.createElement('div');
-  container.innerHTML = html;
-  return [...container.querySelectorAll('span[class^="mtk"]')].map(span => ({
-    text: span.textContent,
-    color: colors[span.className.match(/mtk(\d+)/)[1]]
-  }));
-}
 
 test('CSS numbers, units and hex colors take the Prism attr-value color in both bases', async t => {
   const page = await loadRealMonaco();

@@ -180,8 +180,23 @@ test('every Prism token type the content script sends is one the bridge accepts'
   page.sendTheme(payload);
 
   assert.ok(Object.keys(payload.vs).length > 10);
-  assert.ok(payload.vs.function, 'the function color is sent, for scss function calls and sql built-ins');
+  assert.ok(payload.vs.function, 'the function color is sent, for calls, scss function calls and sql built-ins');
   assert.equal(page.fake.calls.defineTheme.length, 2);
+});
+
+test('the Prism function color colors the function token of calls in both bases', () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  page.sendTheme({
+    vs: { function: { foreground: '#654321', fontStyle: '' } },
+    'vs-dark': { function: { foreground: '#fedcba', fontStyle: 'italic' } }
+  });
+
+  for (const [themeName, foreground, fontStyle] of [['vs', '654321', ''], ['vs-dark', 'fedcba', 'italic']]) {
+    const theme = page.fake.calls.defineTheme.find(call => call.themeName === themeName);
+    const rule = theme.themeData.rules.find(candidate => candidate.token === 'function');
+    assert.deepEqual({ ...rule }, { token: 'function', foreground, fontStyle }, themeName);
+  }
 });
 
 // Every token color rule of Monaco 0.29.1's built-in vs and vs-dark themes, read from the bundle.

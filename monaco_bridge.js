@@ -1,6 +1,7 @@
 // Runs in the page's main world, where ADO's Monaco lives. The single-file view of a pull request is a Monaco
-// editor, so it is colored through Monaco itself: .vue files get a Vue language, and the built-in vs and
-// vs-dark themes get the token colors of the chosen Prism theme, sent by content_script.js.
+// editor, so it is colored through Monaco itself: .vue files get a Vue language, TypeScript, JavaScript and C#
+// get Monaco's own grammars with a function token for calls, and the built-in vs and vs-dark themes get the
+// token colors of the chosen Prism theme, sent by content_script.js.
 // Anything missing or throwing leaves ADO's own rendering in place.
 (() => {
   const BRIDGE_FLAG = '__adoSyntaxHighlighterMonacoBridge';
@@ -38,8 +39,9 @@
     constant: ['constant'],
     namespace: ['namespace'],
     doctype: ['metatag', 'metatag.html', 'metatag.xml', 'metatag.content.html'],
-    // Monaco's scss grammar gives a function call such as `darken(` one meta token, and sql its built-ins predefined.
-    function: ['meta.scss', 'predefined.sql']
+    // `function` is the call token of the bridge's typescript, javascript and csharp grammars. Monaco's scss
+    // grammar gives a function call such as `darken(` one meta token, and sql its built-ins predefined.
+    function: ['function', 'meta.scss', 'predefined.sql']
   };
 
   const attributeRules = [
@@ -155,6 +157,277 @@
       ]
     }
   };
+
+  /*
+   * The typescript, javascript and csharp grammars below are copied from monaco-editor 0.29.1
+   * (esm/vs/basic-languages). The only change is the rules marked "Added": an identifier followed by `(` is a
+   * function token.
+   *
+   * Copyright (c) 2016 - present Microsoft Corporation
+   *
+   * Permission is hereby granted, free of charge, to any person obtaining a copy
+   * of this software and associated documentation files (the "Software"), to deal
+   * in the Software without restriction, including without limitation the rights
+   * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   * copies of the Software, and to permit persons to whom the Software is
+   * furnished to do so, subject to the following conditions:
+   *
+   * The above copyright notice and this permission notice shall be included in all
+   * copies or substantial portions of the Software.
+   *
+   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   * SOFTWARE.
+   */
+  const typescriptLanguage = {
+    defaultToken: 'invalid',
+    tokenPostfix: '.ts',
+    keywords: [
+      'abstract', 'any', 'as', 'asserts', 'bigint', 'boolean', 'break', 'case', 'catch', 'class', 'continue', 'const',
+      'constructor', 'debugger', 'declare', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false',
+      'finally', 'for', 'from', 'function', 'get', 'if', 'implements', 'import', 'in', 'infer', 'instanceof',
+      'interface', 'is', 'keyof', 'let', 'module', 'namespace', 'never', 'new', 'null', 'number', 'object', 'package',
+      'private', 'protected', 'public', 'override', 'readonly', 'require', 'global', 'return', 'set', 'static',
+      'string', 'super', 'switch', 'symbol', 'this', 'throw', 'true', 'try', 'type', 'typeof', 'undefined', 'unique',
+      'unknown', 'var', 'void', 'while', 'with', 'yield', 'async', 'await', 'of'
+    ],
+    operators: [
+      '<=', '>=', '==', '!=', '===', '!==', '=>', '+', '-', '**', '*', '/', '%', '++', '--', '<<', '</', '>>', '>>>',
+      '&', '|', '^', '!', '~', '&&', '||', '??', '?', ':', '=', '+=', '-=', '*=', '**=', '/=', '%=', '<<=', '>>=',
+      '>>>=', '&=', '|=', '^=', '@'
+    ],
+    symbols: /[=><!~?:&|+\-*\/\^%]+/,
+    escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
+    digits: /\d+(_+\d+)*/,
+    octaldigits: /[0-7]+(_+[0-7]+)*/,
+    binarydigits: /[0-1]+(_+[0-1]+)*/,
+    hexdigits: /[[0-9a-fA-F]+(_+[0-9a-fA-F]+)*/,
+    regexpctl: /[(){}\[\]\$\^|\-*+?\.]/,
+    regexpesc: /\\(?:[bBdDfnrstvwWn0\\\/]|@regexpctl|c[A-Z]|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})/,
+    tokenizer: {
+      root: [[/[{}]/, 'delimiter.bracket'], { include: 'common' }],
+      common: [
+        // Added.
+        [/[a-z_$][\w$]*(?=\s*\()/, { cases: { '@keywords': 'keyword', '@default': 'function' } }],
+        [/[a-z_$][\w$]*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
+        [/[A-Z][\w\$]*/, 'type.identifier'],
+        { include: '@whitespace' },
+        [/\/(?=([^\\\/]|\\.)+\/([dgimsuy]*)(\s*)(\.|;|,|\)|\]|\}|$))/, { token: 'regexp', bracket: '@open', next: '@regexp' }],
+        [/[()\[\]]/, '@brackets'],
+        [/[<>](?!@symbols)/, '@brackets'],
+        [/!(?=([^=]|$))/, 'delimiter'],
+        [/@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
+        [/(@digits)[eE]([\-+]?(@digits))?/, 'number.float'],
+        [/(@digits)\.(@digits)([eE][\-+]?(@digits))?/, 'number.float'],
+        [/0[xX](@hexdigits)n?/, 'number.hex'],
+        [/0[oO]?(@octaldigits)n?/, 'number.octal'],
+        [/0[bB](@binarydigits)n?/, 'number.binary'],
+        [/(@digits)n?/, 'number'],
+        [/[;,.]/, 'delimiter'],
+        [/"([^"\\]|\\.)*$/, 'string.invalid'],
+        [/'([^'\\]|\\.)*$/, 'string.invalid'],
+        [/"/, 'string', '@string_double'],
+        [/'/, 'string', '@string_single'],
+        [/`/, 'string', '@string_backtick']
+      ],
+      whitespace: [
+        [/[ \t\r\n]+/, ''],
+        [/\/\*\*(?!\/)/, 'comment.doc', '@jsdoc'],
+        [/\/\*/, 'comment', '@comment'],
+        [/\/\/.*$/, 'comment']
+      ],
+      comment: [
+        [/[^\/*]+/, 'comment'],
+        [/\*\//, 'comment', '@pop'],
+        [/[\/*]/, 'comment']
+      ],
+      jsdoc: [
+        [/[^\/*]+/, 'comment.doc'],
+        [/\*\//, 'comment.doc', '@pop'],
+        [/[\/*]/, 'comment.doc']
+      ],
+      regexp: [
+        [/(\{)(\d+(?:,\d*)?)(\})/, ['regexp.escape.control', 'regexp.escape.control', 'regexp.escape.control']],
+        [/(\[)(\^?)(?=(?:[^\]\\\/]|\\.)+)/, ['regexp.escape.control', { token: 'regexp.escape.control', next: '@regexrange' }]],
+        [/(\()(\?:|\?=|\?!)/, ['regexp.escape.control', 'regexp.escape.control']],
+        [/[()]/, 'regexp.escape.control'],
+        [/@regexpctl/, 'regexp.escape.control'],
+        [/[^\\\/]/, 'regexp'],
+        [/@regexpesc/, 'regexp.escape'],
+        [/\\\./, 'regexp.invalid'],
+        [/(\/)([dgimsuy]*)/, [{ token: 'regexp', bracket: '@close', next: '@pop' }, 'keyword.other']]
+      ],
+      regexrange: [
+        [/-/, 'regexp.escape.control'],
+        [/\^/, 'regexp.invalid'],
+        [/@regexpesc/, 'regexp.escape'],
+        [/[^\]]/, 'regexp'],
+        [/\]/, { token: 'regexp.escape.control', next: '@pop', bracket: '@close' }]
+      ],
+      string_double: [
+        [/[^\\"]+/, 'string'],
+        [/@escapes/, 'string.escape'],
+        [/\\./, 'string.escape.invalid'],
+        [/"/, 'string', '@pop']
+      ],
+      string_single: [
+        [/[^\\']+/, 'string'],
+        [/@escapes/, 'string.escape'],
+        [/\\./, 'string.escape.invalid'],
+        [/'/, 'string', '@pop']
+      ],
+      string_backtick: [
+        [/\$\{/, { token: 'delimiter.bracket', next: '@bracketCounting' }],
+        [/[^\\`$]+/, 'string'],
+        [/@escapes/, 'string.escape'],
+        [/\\./, 'string.escape.invalid'],
+        [/`/, 'string', '@pop']
+      ],
+      bracketCounting: [
+        [/\{/, 'delimiter.bracket', '@bracketCounting'],
+        [/\}/, 'delimiter.bracket', '@pop'],
+        { include: 'common' }
+      ]
+    }
+  };
+
+  const javascriptLanguage = {
+    ...typescriptLanguage,
+    tokenPostfix: '.js',
+    keywords: [
+      'break', 'case', 'catch', 'class', 'continue', 'const', 'constructor', 'debugger', 'default', 'delete', 'do',
+      'else', 'export', 'extends', 'false', 'finally', 'for', 'from', 'function', 'get', 'if', 'import', 'in',
+      'instanceof', 'let', 'new', 'null', 'return', 'set', 'super', 'switch', 'symbol', 'this', 'throw', 'true', 'try',
+      'typeof', 'undefined', 'var', 'void', 'while', 'with', 'yield', 'async', 'await', 'of'
+    ],
+    typeKeywords: []
+  };
+
+  const csharpIdentifierCases = {
+    '@namespaceFollows': { token: 'keyword.$0', next: '@namespace' },
+    '@keywords': { token: 'keyword.$0', next: '@qualified' }
+  };
+
+  const csharpLanguage = {
+    defaultToken: '',
+    tokenPostfix: '.cs',
+    brackets: [
+      { open: '{', close: '}', token: 'delimiter.curly' },
+      { open: '[', close: ']', token: 'delimiter.square' },
+      { open: '(', close: ')', token: 'delimiter.parenthesis' },
+      { open: '<', close: '>', token: 'delimiter.angle' }
+    ],
+    keywords: [
+      'extern', 'alias', 'using', 'bool', 'decimal', 'sbyte', 'byte', 'short', 'ushort', 'int', 'uint', 'long', 'ulong',
+      'char', 'float', 'double', 'object', 'dynamic', 'string', 'assembly', 'is', 'as', 'ref', 'out', 'this', 'base',
+      'new', 'typeof', 'void', 'checked', 'unchecked', 'default', 'delegate', 'var', 'const', 'if', 'else', 'switch',
+      'case', 'while', 'do', 'for', 'foreach', 'in', 'break', 'continue', 'goto', 'return', 'throw', 'try', 'catch',
+      'finally', 'lock', 'yield', 'from', 'let', 'where', 'join', 'on', 'equals', 'into', 'orderby', 'ascending',
+      'descending', 'select', 'group', 'by', 'namespace', 'partial', 'class', 'field', 'event', 'method', 'param',
+      'public', 'protected', 'internal', 'private', 'abstract', 'sealed', 'static', 'struct', 'readonly', 'volatile',
+      'virtual', 'override', 'params', 'get', 'set', 'add', 'remove', 'operator', 'true', 'false', 'implicit',
+      'explicit', 'interface', 'enum', 'null', 'async', 'await', 'fixed', 'sizeof', 'stackalloc', 'unsafe', 'nameof',
+      'when'
+    ],
+    namespaceFollows: ['namespace', 'using'],
+    parenFollows: ['if', 'for', 'while', 'switch', 'foreach', 'using', 'catch', 'when'],
+    operators: [
+      '=', '??', '||', '&&', '|', '^', '&', '==', '!=', '<=', '>=', '<<', '+', '-', '*', '/', '%', '!', '~', '++', '--',
+      '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '>>', '=>'
+    ],
+    symbols: /[=><!~?:&|+\-*\/\^%]+/,
+    escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
+    tokenizer: {
+      root: [
+        // Added.
+        [/\@?[a-zA-Z_]\w*(?=\s*\()/, { cases: { ...csharpIdentifierCases, '@default': { token: 'function', next: '@qualified' } } }],
+        [/\@?[a-zA-Z_]\w*/, { cases: { ...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } } }],
+        { include: '@whitespace' },
+        [/}/, {
+          cases: {
+            '$S2==interpolatedstring': { token: 'string.quote', next: '@pop' },
+            '$S2==litinterpstring': { token: 'string.quote', next: '@pop' },
+            '@default': '@brackets'
+          }
+        }],
+        [/[{}()\[\]]/, '@brackets'],
+        [/[<>](?!@symbols)/, '@brackets'],
+        [/@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
+        [/[0-9_]*\.[0-9_]+([eE][\-+]?\d+)?[fFdD]?/, 'number.float'],
+        [/0[xX][0-9a-fA-F_]+/, 'number.hex'],
+        [/0[bB][01_]+/, 'number.hex'],
+        [/[0-9_]+/, 'number'],
+        [/[;,.]/, 'delimiter'],
+        [/"([^"\\]|\\.)*$/, 'string.invalid'],
+        [/"/, { token: 'string.quote', next: '@string' }],
+        [/\$\@"/, { token: 'string.quote', next: '@litinterpstring' }],
+        [/\@"/, { token: 'string.quote', next: '@litstring' }],
+        [/\$"/, { token: 'string.quote', next: '@interpolatedstring' }],
+        [/'[^\\']'/, 'string'],
+        [/(')(@escapes)(')/, ['string', 'string.escape', 'string']],
+        [/'/, 'string.invalid']
+      ],
+      qualified: [
+        // Added.
+        [/[a-zA-Z_][\w]*(?=\s*\()/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'function' } }],
+        [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
+        [/\./, 'delimiter'],
+        ['', '', '@pop']
+      ],
+      namespace: [
+        { include: '@whitespace' },
+        [/[A-Z]\w*/, 'namespace'],
+        [/[\.=]/, 'delimiter'],
+        ['', '', '@pop']
+      ],
+      comment: [
+        [/[^\/*]+/, 'comment'],
+        ['\\*/', 'comment', '@pop'],
+        [/[\/*]/, 'comment']
+      ],
+      string: [
+        [/[^\\"]+/, 'string'],
+        [/@escapes/, 'string.escape'],
+        [/\\./, 'string.escape.invalid'],
+        [/"/, { token: 'string.quote', next: '@pop' }]
+      ],
+      litstring: [
+        [/[^"]+/, 'string'],
+        [/""/, 'string.escape'],
+        [/"/, { token: 'string.quote', next: '@pop' }]
+      ],
+      litinterpstring: [
+        [/[^"{]+/, 'string'],
+        [/""/, 'string.escape'],
+        [/{{/, 'string.escape'],
+        [/}}/, 'string.escape'],
+        [/{/, { token: 'string.quote', next: 'root.litinterpstring' }],
+        [/"/, { token: 'string.quote', next: '@pop' }]
+      ],
+      interpolatedstring: [
+        [/[^\\"{]+/, 'string'],
+        [/@escapes/, 'string.escape'],
+        [/\\./, 'string.escape.invalid'],
+        [/{{/, 'string.escape'],
+        [/}}/, 'string.escape'],
+        [/{/, { token: 'string.quote', next: 'root.interpolatedstring' }],
+        [/"/, { token: 'string.quote', next: '@pop' }]
+      ],
+      whitespace: [
+        [/^[ \t\v\f]*#((r)|(load))(?=\s)/, 'directive.csx'],
+        [/^[ \t\v\f]*#\w.*$/, 'namespace.cpp'],
+        [/[ \t\v\f\r\n]+/, ''],
+        [/\/\*/, 'comment', '@comment'],
+        [/\/\/.*$/, 'comment']
+      ]
+    }
+  };
+
+  const CALL_GRAMMARS = { typescript: typescriptLanguage, javascript: javascriptLanguage, csharp: csharpLanguage };
 
   let monaco = null;
   let startedLate = false;
@@ -328,6 +601,25 @@
     editorApi.getModels().forEach(guarded(updateModel));
   }
 
+  // Monaco loads ADO's grammar for a language the first time the language is used, and that grammar then
+  // replaces any grammar registered for it before. colorize() waits for a grammar that is still loading, so each
+  // copy is registered after ADO's. A language that is not registered yet is handled on its first use.
+  function startCallGrammars() {
+    const { languages } = monaco;
+    if (!hasFunctions(languages, ['getLanguages', 'onLanguage', 'setMonarchTokensProvider']) || !hasFunctions(monaco.editor, ['colorize'])) return;
+    for (const [languageId, grammar] of Object.entries(CALL_GRAMMARS)) {
+      const register = guarded(() => languages.setMonarchTokensProvider(languageId, grammar));
+      const registerAfterAdoGrammar = () => {
+        Promise.resolve().then(() => monaco.editor.colorize('', languageId, {})).then(register, register);
+      };
+      if (languages.getLanguages().some(language => language.id === languageId)) {
+        registerAfterAdoGrammar();
+      } else {
+        languages.onLanguage(languageId, guarded(registerAfterAdoGrammar));
+      }
+    }
+  }
+
   function install(api) {
     if (monaco || !isPlainObject(api?.editor) || !isPlainObject(api?.languages)) return;
     monaco = api;
@@ -338,6 +630,7 @@
       }), 0)));
     }
     applyTheme();
+    guarded(startCallGrammars)();
     guarded(startVueLanguage)();
   }
 

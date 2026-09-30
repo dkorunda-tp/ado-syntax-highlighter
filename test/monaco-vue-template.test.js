@@ -2,7 +2,7 @@
 // Runs the vue grammar of monaco_bridge.js on the real monaco-editor 0.29 build.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadRealMonaco, tokenizeLines, languagesOf, waitForEmbeddedGrammars } = require('./monaco-helpers');
+const { loadRealMonaco, tokenizeLines, languagesOf, waitForEmbeddedGrammars, renderedColors } = require('./monaco-helpers');
 
 // Wraps `body` in a template block, tokenizes it, and returns the tokens of the body lines.
 function tokenizeTemplate(monaco, body) {
@@ -97,7 +97,7 @@ test('vue template expressions', async t => {
     const [line] = tokenizeTemplate(monaco, ['  <Check @update:model-value="onToggleItem(item)" />']);
 
     assert.equal(typeOf(line, '@update:model-value'), 'attribute.name.vue');
-    assert.equal(typeOf(line, 'onToggleItem'), 'identifier.ts');
+    assert.equal(typeOf(line, 'onToggleItem'), 'function.ts');
     assert.equal(typeOf(line, 'item'), 'identifier.ts');
     assert.equal(typeOf(line, '/>'), 'delimiter.vue');
   });
@@ -106,7 +106,8 @@ test('vue template expressions', async t => {
     const [line] = tokenizeTemplate(monaco, ['  <In v-bind:id="uid" v-on:blur="save()" v-model="form.name">']);
 
     for (const name of ['v-bind:id', 'v-on:blur', 'v-model']) assert.equal(typeOf(line, name), 'attribute.name.vue', name);
-    for (const name of ['uid', 'save', 'form', 'name']) assert.equal(typeOf(line, name), 'identifier.ts', name);
+    for (const name of ['uid', 'form', 'name']) assert.equal(typeOf(line, name), 'identifier.ts', name);
+    assert.equal(typeOf(line, 'save'), 'function.ts');
   });
 
   await t.test('slot shorthand and v-slot, with and without a value', () => {
@@ -222,19 +223,6 @@ test('vue template expressions', async t => {
   });
 });
 
-// The color Monaco renders for each piece of `text`, from colorize output and the theme's `.mtkN` rules.
-async function renderedColors(monaco, window, text) {
-  const html = await monaco.editor.colorize(text, 'vue', {});
-  const css = [...window.document.querySelectorAll('style.monaco-colors')].map(style => style.textContent).join('\n');
-  const colors = Object.fromEntries([...css.matchAll(/\.mtk(\d+) \{ color: (#[0-9a-f]+); \}/gi)].map(([, id, color]) => [id, color.toLowerCase()]));
-  const container = window.document.createElement('div');
-  container.innerHTML = html;
-  return [...container.querySelectorAll('span[class^="mtk"]')].map(span => ({
-    text: span.textContent,
-    color: colors[span.className.match(/mtk(\d+)/)[1]]
-  }));
-}
-
 test('template expressions take the Prism colors of their TypeScript tokens', async t => {
   const page = await loadRealMonaco();
   t.after(() => page.close());
@@ -250,7 +238,7 @@ test('template expressions take the Prism colors of their TypeScript tokens', as
   page.sendTheme({ vs: tokens, 'vs-dark': tokens });
   monaco.editor.setTheme('vs');
 
-  const pieces = await renderedColors(monaco, window, '<template>\n  <p v-for="a in b" :k="\'s\'">{{ c }}</p>\n</template>');
+  const pieces = await renderedColors(monaco, window, '<template>\n  <p v-for="a in b" :k="\'s\'">{{ c }}</p>\n</template>', 'vue');
   // Neighbors of one type share a span, so `>{{` is one piece.
   const colorOf = text => {
     const piece = pieces.find(candidate => candidate.text.trim() === text) || pieces.find(candidate => candidate.text.includes(text));
