@@ -23,7 +23,7 @@ test('script setup lang ts, template and scoped scss style', () => {
     '.a { .b { color: red; } }',
     '</style>'
   ]), [
-    'markup', 'markup', 'markup',
+    'vue-template', 'vue-template', 'vue-template',
     'markup', 'typescript', 'markup',
     'markup', 'scss', 'markup'
   ]);
@@ -44,7 +44,7 @@ test('nested template tags close the block only at depth zero', () => {
     'export default {}',
     '</script>'
   ]), [
-    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template',
     'markup', 'typescript', 'markup'
   ]);
 });
@@ -88,7 +88,7 @@ test('template tags inside HTML comments do not change the template depth', () =
     'const a = 1',
     '</script>'
   ]), [
-    'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup', 'markup',
+    'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template',
     'markup', 'typescript', 'markup'
   ]);
 });
@@ -99,7 +99,7 @@ test('a column-0 script tag inside a template does not open a block', () => {
     '<script>',
     'not code',
     '</template>'
-  ]), ['markup', 'markup', 'markup', 'markup']);
+  ]), ['vue-template', 'vue-template', 'vue-template', 'vue-template']);
 });
 
 test('a plain style, a scoped style and a non-scss lang are css', () => {
@@ -160,7 +160,7 @@ test('CRLF text gives the same map as LF text', () => {
     lineLanguages(lines)
   );
   assert.deepEqual(Array.from(window.parseVueLineLanguages(lines.join('\r\n'))),
-    ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
+    ['vue-template', 'vue-template', 'vue-template', 'markup', 'typescript', 'markup']);
 });
 
 test('lines between and around blocks are markup', () => {
@@ -185,7 +185,7 @@ test('lines between and around blocks are markup', () => {
   ]);
 });
 
-test('a one-line block is markup and closes on the same line', () => {
+test('a one-line block closes on the same line; a style line is markup and a template line is vue-template', () => {
   assert.deepEqual(lineLanguages([
     '<style>.a { color: red; }</style>',
     '.not-style {}',
@@ -193,7 +193,20 @@ test('a one-line block is markup and closes on the same line', () => {
     '<script setup lang="ts">',
     'const a = 1',
     '</script>'
-  ]), ['markup', 'markup', 'markup', 'markup', 'typescript', 'markup']);
+  ]), ['markup', 'markup', 'vue-template', 'markup', 'typescript', 'markup']);
+});
+
+test('a template opening tag over several lines is vue-template on every line', () => {
+  assert.deepEqual(lineLanguages([
+    '<template',
+    '  lang="html"',
+    '>',
+    '  <div />',
+    '</template>',
+    '<script>',
+    'const a = 1',
+    '</script>'
+  ]), ['vue-template', 'vue-template', 'vue-template', 'vue-template', 'vue-template', 'markup', 'typescript', 'markup']);
 });
 
 test('an opening tag with attributes over several lines', () => {

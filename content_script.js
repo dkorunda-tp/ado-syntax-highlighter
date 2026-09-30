@@ -89,10 +89,49 @@ const adoRequests = new Map();
 let adoRequestsPullRequest = null;
 const vueBlockOpenPattern = /^<(template|script|style)(?![\w-])/;
 
+// Markup plus Vue template syntax: `{{ expr }}` and the quoted values of directive attributes (`v-*`, `:x`, `@x`, `#x`)
+// are TypeScript. Other attributes keep the markup rules.
+function addVueTemplateGrammar() {
+  const typescriptPart = pattern => ({
+    pattern,
+    lookbehind: true,
+    alias: ['typescript', 'language-typescript'],
+    inside: Prism.languages.typescript
+  });
+  Prism.languages['vue-template'] = Prism.languages.extend('markup', {});
+  // TypeScript identifiers are plain text, so they take the color of the nearest colored token. The value is not
+  // inside an attr-value token, and custom_styles.css gives the `vue-template-tag` element token the row color
+  // instead of the tag color. They then show the base text color, as in the single-file view. Only the quotes are
+  // attr-value, and the tag name keeps its own tag token.
+  Prism.languages['vue-template'].tag.alias = 'vue-template-tag';
+  Prism.languages['vue-template'].tag.inside['special-attr'].unshift({
+    pattern: /(^|["'\s])(?:v-|[:@#])[^\s=>\/"']+\s*=\s*(?:"[^"]*"|'[^']*')/,
+    lookbehind: true,
+    inside: {
+      'value': typescriptPart(/(^[^\s=]+\s*=\s*(["']))[\s\S]+(?=\2$)/),
+      'attr-value': /["']/,
+      'punctuation': { pattern: /=/, alias: 'attr-equals' },
+      'attr-name': /^[^\s=]+/
+    }
+  });
+  // Before `comment` and `tag`, because Vue ends an expression only at `}}`. Both are greedy, so a `{{ }}` inside a
+  // comment or an attribute value still becomes part of that comment or tag.
+  Prism.languages.insertBefore('vue-template', 'comment', {
+    'interpolation': {
+      pattern: /\{\{[\s\S]*?\}\}/,
+      inside: {
+        'expression': typescriptPart(/(^\{\{)[\s\S]+(?=\}\}$)/),
+        'punctuation': /\{\{|\}\}/
+      }
+    }
+  });
+}
+addVueTemplateGrammar();
+
 function getVueBlockLanguage(name, attributes) {
   if (name === 'script') return 'typescript';
   if (name === 'style') return /(?:^|\s)lang\s*=\s*(["']?)scss\1(?=[\s/]|$)/.test(attributes) ? 'scss' : 'css';
-  return 'markup';
+  return 'vue-template';
 }
 
 function countMatches(text, pattern) {
@@ -170,10 +209,14 @@ function parseVueLineLanguages(text) {
     return after.includes(`</${block.name}`) ? null : block;
   };
 
+  // The template tag lines join the template run, so a tag or a comment that crosses one keeps its tokens.
+  // Script and style tag lines stay markup.
+  const tagLineLanguage = name => (name === 'template' ? getVueBlockLanguage(name) : 'markup');
+
   for (const line of splitFileLines(text)) {
     if (!block) {
-      languages.push('markup');
       const match = !rootComment.inComment && line.match(vueBlockOpenPattern);
+      languages.push(match ? tagLineLanguage(match[1]) : 'markup');
       if (match) {
         block = { name: match[1], attributes: '', inOpenTag: true };
         block = readOpenTag(line.slice(match[0].length));
@@ -181,11 +224,11 @@ function parseVueLineLanguages(text) {
         removeHtmlComments(line, rootComment);
       }
     } else if (block.inOpenTag) {
-      languages.push('markup');
+      languages.push(tagLineLanguage(block.name));
       block = readOpenTag(line);
     } else if (block.name === 'template') {
-      languages.push('markup');
       block.depth += getTemplateDepthChange(removeHtmlComments(line, block));
+      languages.push(block.language);
       if (block.depth <= 0) block = null;
     } else if (line.includes(`</${block.name}`)) {
       languages.push('markup');

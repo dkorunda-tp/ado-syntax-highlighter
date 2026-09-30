@@ -1,0 +1,4 @@
+/* Text directly in a Vue template element, such as a TypeScript directive value, keeps the row color. */
+.ado-syntax-highlighted .token.tag.vue-template-tag {
+  color: inherit;
+}

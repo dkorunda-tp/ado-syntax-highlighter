@@ -197,6 +197,18 @@ function highlightedClones(fileDiffElement) {
   return [...fileDiffElement.querySelectorAll('.repos-line-content.ado-syntax-highlighted')];
 }
 
+function texts(content, selector) {
+  return [...content.querySelectorAll(selector)].map(element => element.textContent);
+}
+
+// The HTML that per-row highlighting gives, serialized the way the page serializes it.
+function perRowHtml(window, text, language) {
+  const grammar = window.Prism.languages[language];
+  const element = window.document.createElement('div');
+  element.innerHTML = grammar ? window.Prism.highlight(text, grammar, language) : window.Prism.util.encode(text);
+  return element.innerHTML;
+}
+
 module.exports = {
   PR_URL,
   loadExtension,
@@ -209,5 +221,7 @@ module.exports = {
   jsonResponse,
   iteration,
   createAdoServer,
-  highlightedClones
+  highlightedClones,
+  texts,
+  perRowHtml
 };
