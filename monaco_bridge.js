@@ -162,7 +162,7 @@
   };
 
   /*
-   * The typescript, javascript and csharp grammars below are copied from monaco-editor 0.29.1
+   * The typescript, javascript, csharp and css grammars below are copied from monaco-editor 0.29.1
    * (esm/vs/basic-languages). The only change is the parts marked "Added": a call, an operator and true or false
    * get the function, operator and boolean tokens, where Prism's grammar of the same language gives those types.
    * The patterns and word lists of the Added parts are
@@ -672,7 +672,144 @@
     }
   };
 
-  const CALL_GRAMMARS = { typescript: typescriptLanguage, javascript: javascriptLanguage, csharp: csharpLanguage };
+  // Added: a function name, such as rgb, calc, var or url before `(`, is a function token, as in Prism's css
+  // grammar. The `(` keeps its attribute.value token, which Monaco's own grammar gives the name and `(` together.
+  const cssLanguage = {
+    defaultToken: '',
+    tokenPostfix: '.css',
+    ws: '[ \t\n\r\f]*',
+    identifier: '-?-?([a-zA-Z]|(\\\\(([0-9a-fA-F]{1,6}\\s?)|[^[0-9a-fA-F])))([\\w\\-]|(\\\\(([0-9a-fA-F]{1,6}\\s?)|[^[0-9a-fA-F])))*',
+    brackets: [
+      { open: '{', close: '}', token: 'delimiter.bracket' },
+      { open: '[', close: ']', token: 'delimiter.bracket' },
+      { open: '(', close: ')', token: 'delimiter.parenthesis' },
+      { open: '<', close: '>', token: 'delimiter.angle' }
+    ],
+    tokenizer: {
+      root: [{ include: '@selector' }],
+      selector: [
+        { include: '@comments' },
+        { include: '@import' },
+        { include: '@strings' },
+        ['[@](keyframes|-webkit-keyframes|-moz-keyframes|-o-keyframes)', { token: 'keyword', next: '@keyframedeclaration' }],
+        ['[@](page|content|font-face|-moz-document)', { token: 'keyword' }],
+        ['[@](charset|namespace)', { token: 'keyword', next: '@declarationbody' }],
+        // Added: 'function' in place of 'attribute.value' for url-prefix and url, here and in term.
+        ['(url-prefix)(\\()', ['function', { token: 'delimiter.parenthesis', next: '@urldeclaration' }]],
+        ['(url)(\\()', ['function', { token: 'delimiter.parenthesis', next: '@urldeclaration' }]],
+        { include: '@selectorname' },
+        ['[\\*]', 'tag'],
+        ['[>\\+,]', 'delimiter'],
+        ['\\[', { token: 'delimiter.bracket', next: '@selectorattribute' }],
+        ['{', { token: 'delimiter.bracket', next: '@selectorbody' }]
+      ],
+      selectorbody: [
+        { include: '@comments' },
+        ['[*_]?@identifier@ws:(?=(\\s|\\d|[^{;}]*[;}]))', 'attribute.name', '@rulevalue'],
+        ['}', { token: 'delimiter.bracket', next: '@pop' }]
+      ],
+      selectorname: [
+        ['(\\.|#(?=[^{])|%|(@identifier)|:)+', 'tag']
+      ],
+      selectorattribute: [
+        { include: '@term' },
+        [']', { token: 'delimiter.bracket', next: '@pop' }]
+      ],
+      term: [
+        { include: '@comments' },
+        ['(url-prefix)(\\()', ['function', { token: 'delimiter.parenthesis', next: '@urldeclaration' }]],
+        ['(url)(\\()', ['function', { token: 'delimiter.parenthesis', next: '@urldeclaration' }]],
+        { include: '@functioninvocation' },
+        { include: '@numbers' },
+        { include: '@name' },
+        { include: '@strings' },
+        ['([<>=\\+\\-\\*\\/\\^\\|\\~,])', 'delimiter'],
+        [',', 'delimiter']
+      ],
+      rulevalue: [
+        { include: '@comments' },
+        { include: '@strings' },
+        { include: '@term' },
+        ['!important', 'keyword'],
+        [';', 'delimiter', '@pop'],
+        ['(?=})', { token: '', next: '@pop' }]
+      ],
+      warndebug: [['[@](warn|debug)', { token: 'keyword', next: '@declarationbody' }]],
+      import: [['[@](import)', { token: 'keyword', next: '@declarationbody' }]],
+      urldeclaration: [
+        { include: '@strings' },
+        ['[^)\r\n]+', 'string'],
+        ['\\)', { token: 'delimiter.parenthesis', next: '@pop' }]
+      ],
+      parenthizedterm: [
+        { include: '@term' },
+        ['\\)', { token: 'delimiter.parenthesis', next: '@pop' }]
+      ],
+      declarationbody: [
+        { include: '@term' },
+        [';', 'delimiter', '@pop'],
+        ['(?=})', { token: '', next: '@pop' }]
+      ],
+      comments: [
+        ['\\/\\*', 'comment', '@comment'],
+        ['\\/\\/+.*', 'comment']
+      ],
+      comment: [
+        ['\\*\\/', 'comment', '@pop'],
+        [/[^*/]+/, 'comment'],
+        [/./, 'comment']
+      ],
+      name: [['@identifier', 'attribute.value']],
+      numbers: [
+        ['-?(\\d*\\.)?\\d+([eE][\\-+]?\\d+)?', { token: 'attribute.value.number', next: '@units' }],
+        ['#[0-9a-fA-F_]+(?!\\w)', 'attribute.value.hex']
+      ],
+      units: [
+        ['(em|ex|ch|rem|vmin|vmax|vw|vh|vm|cm|mm|in|px|pt|pc|deg|grad|rad|turn|s|ms|Hz|kHz|%)?', 'attribute.value.unit', '@pop']
+      ],
+      keyframedeclaration: [
+        ['@identifier', 'attribute.value'],
+        ['{', { token: 'delimiter.bracket', switchTo: '@keyframebody' }]
+      ],
+      keyframebody: [
+        { include: '@term' },
+        ['{', { token: 'delimiter.bracket', next: '@selectorbody' }],
+        ['}', { token: 'delimiter.bracket', next: '@pop' }]
+      ],
+      functioninvocation: [
+        // Added: the name and its `(` as two tokens, in place of ['@identifier\\(', ...].
+        ['@identifier(?=\\()', { token: 'function', next: '@functionopen' }]
+      ],
+      // Added.
+      functionopen: [
+        ['\\(', { token: 'attribute.value', switchTo: '@functionarguments' }]
+      ],
+      functionarguments: [
+        ['\\$@identifier@ws:', 'attribute.name'],
+        ['[,]', 'delimiter'],
+        { include: '@term' },
+        ['\\)', { token: 'attribute.value', next: '@pop' }]
+      ],
+      strings: [
+        ['~?"', { token: 'string', next: '@stringenddoublequote' }],
+        ["~?'", { token: 'string', next: '@stringendquote' }]
+      ],
+      stringenddoublequote: [
+        ['\\\\.', 'string'],
+        ['"', { token: 'string', next: '@pop' }],
+        [/[^\\"]+/, 'string'],
+        ['.', 'string']
+      ],
+      stringendquote: [
+        ['\\\\.', 'string'],
+        ["'", { token: 'string', next: '@pop' }],
+        [/[^\\']+/, 'string'],
+        ['.', 'string']
+      ]
+    }
+  };
+
+  const CALL_GRAMMARS = { typescript: typescriptLanguage, javascript: javascriptLanguage, csharp: csharpLanguage, css: cssLanguage };
 
   let monaco = null;
   let startedLate = false;

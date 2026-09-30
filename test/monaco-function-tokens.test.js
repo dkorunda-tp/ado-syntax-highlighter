@@ -375,6 +375,100 @@ test('a Vue macro whose generic spans lines is a call and a new before a line br
   }
 });
 
+const STYLE_CALLS = [
+  '.a { color: rgb(0, 0, 0); width: calc(100% - var(--gap)); transform: translateY(-50%) rotate(45deg); }',
+  '.b { background: url(img.png); background-image: url("x.png"), linear-gradient(to right, #fff, #000); }',
+  '.c:not(.d):nth-child(2n+1) { color: red; }',
+  '@media (max-width: 600px) { .e { color: hsl(120deg 50% 50%); } }',
+  '.f { color: rgba(var(--c), 0.5); content: attr(data-x); grid-template-columns: repeat(3, minmax(0, 1fr)); }',
+  '.g::before { filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.2)); font-family: "Roboto", sans-serif; }'
+];
+
+const SCSS_CALLS = [
+  '.a { color: darken($c, 10%); width: math.div(10px, 2); margin: map-get($m, key); }',
+  '.b { &:hover { color: lighten(#fff, 5%); } }',
+  '$x: rgba(0, 0, 0, 0.5);'
+];
+
+// A function name in the css and scss copies has the Prism function color where Prism shows a function. Monaco's
+// scss grammar gives a call one meta token, which also takes the function color, so only names are compared.
+test('a css or scss function name has the function color where Prism shows a function', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco } = page;
+  const Prism = loadPrism();
+  await waitForEmbeddedGrammars(monaco);
+  await waitFor(() => tokenize(monaco, 'a { color: rgb(0) }', 'css')[0].some(token => token.type === 'attribute.name.css'), 'the css grammar');
+  await settle(page.window);
+  const functionColored = type => type.startsWith('function.') || type === 'meta.scss';
+
+  // Two scss differences stay (parent decision D6): Prism's scss grammar gives url its own url type where Monaco's
+  // meta token shows the function color, and reads the pseudo-class of a selector with parentheses as a function.
+  const scssCorpus = [...STYLE_CALLS.filter(line => !/url\(|:not\(/.test(line)), ...SCSS_CALLS];
+  for (const [language, corpus] of [['css', STYLE_CALLS], ['scss', scssCorpus]]) {
+    const mismatches = [];
+    tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
+      const pieces = prismPieces(Prism, corpus[index], language);
+      let offset = 0;
+      for (const token of tokens) {
+        for (let char = offset; char < offset + token.text.length; char++) {
+          if (!/[-\w]/.test(corpus[index][char])) continue;
+          if (functionColored(token.type) !== isPrismCall(pieces, char)) {
+            mismatches.push(`"${corpus[index][char]}" at ${char} (${token.type}) in: ${corpus[index]}`);
+          }
+        }
+        offset += token.text.length;
+      }
+    });
+    assert.deepEqual(mismatches, [], language);
+  }
+});
+
+// Monaco's own css grammar on the left, the copy on the right: only a function name changes, from the
+// attribute.value token that it shared with its `(`, to function.
+test('every css token other than a function name is the same as in Monaco\'s own grammar', async t => {
+  const page = await loadRealMonaco({ bridge: 'none' });
+  t.after(() => page.close());
+  const { monaco } = page;
+  const sample = [...STYLE_CALLS, '@import url("a.css");', '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }',
+    '.h[data-x="1"] > .i + .j, .k { margin: 0 auto !important; } /* rgb(1) */'].join('\n');
+  await waitFor(() => tokenize(monaco, 'a { color: red }', 'css')[0].some(token => token.type === 'attribute.name.css'), 'Monaco\'s css grammar');
+  const before = tokenize(monaco, sample, 'css');
+
+  page.startBridge();
+  await waitFor(() => tokenize(monaco, 'a { color: rgb(0) }', 'css')[0].some(token => token.type === 'function.css'), 'the css copy');
+
+  const lines = sample.split('\n');
+  let names = 0;
+  tokenize(monaco, sample, 'css').forEach((line, index) => {
+    const oldTypes = charTypes(before[index]);
+    let offset = 0;
+    for (const token of line) {
+      for (let char = offset; char < offset + token.text.length; char++) {
+        if (token.type === oldTypes[char]) continue;
+        const where = `line ${index + 1}, "${token.text}" was ${oldTypes[char]}: ${lines[index]}`;
+        assert.equal(token.type, 'function.css', where);
+        assert.equal(oldTypes[char], 'attribute.value.css', where);
+        assert.match(lines[index].slice(offset + token.text.length), /^\(/, where);
+        names++;
+      }
+      offset += token.text.length;
+    }
+  });
+  assert.ok(names >= 20, `${names} name characters`);
+});
+
+test('a function name in a .vue style block has the function token', async t => {
+  const page = await loadRealMonaco();
+  t.after(() => page.close());
+  const { monaco } = page;
+  await waitForEmbeddedGrammars(monaco);
+  const lines = ['<style scoped>', '.a { color: rgb(0, 0, 0); width: calc(100% - 4px); }', '</style>'];
+  await waitFor(() => tokenizeLines(monaco, lines)[1].some(token => token.type === 'function.css'), 'the css copy in the vue embed');
+
+  assert.equal(typeOf(tokenizeLines(monaco, lines)[1], 'calc'), 'function.css');
+});
+
 const CSHARP_SAMPLE = `using System;
 using System.Collections.Generic;
 namespace Top.Provider.Matching
