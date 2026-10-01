@@ -329,19 +329,26 @@ function chooseDiffCommits(iterations, iterationId, baseId) {
   return newCommit && oldCommit ? { old: oldCommit, new: newCommit } : null;
 }
 
+// A request that has not finished, body included, after this time is aborted, so a stalled version cannot block
+// the older versions or keep its card in flight.
+const ADO_REQUEST_TIMEOUT_MS = 15000;
+
 // Same-origin fetch, so the page session cookies go with it. A failed request is removed from the cache, so a later call retries it.
 function fetchFromAdo(url, accept, read) {
   if (!adoRequests.has(url)) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ADO_REQUEST_TIMEOUT_MS);
     const request = fetch(url, {
       credentials: 'same-origin',
-      headers: { Accept: accept, 'X-TFS-FedAuthRedirect': 'Suppress' }
+      headers: { Accept: accept, 'X-TFS-FedAuthRedirect': 'Suppress' },
+      signal: controller.signal
     }).then(response => {
       const contentType = response.headers.get('content-type') || '';
       if (response.status !== 200 || contentType.includes('text/html')) {
         throw new Error(`HTTP ${response.status} for ${url}`);
       }
       return read(response);
-    });
+    }).finally(() => clearTimeout(timeout));
     request.catch(() => {
       if (adoRequests.get(url) === request) adoRequests.delete(url);
     });
@@ -359,14 +366,47 @@ function keepAdoRequestsFor(context) {
   }
 }
 
-async function loadVueFileLines(context, filePaths) {
+// The iterations list grows with every push, so each pass fetches it again. File texts stay cached, because
+// their URL names the commit.
+function forgetIterationsLists() {
+  for (const url of adoRequests.keys()) {
+    if (url.includes('/iterations?')) adoRequests.delete(url);
+  }
+}
+
+// The page can show an older push than the newest one, for example after a push while the page is open, or in
+// an Overview comment thread. So with no iteration in the URL, a side tries the commits of the iterations
+// newest first. An iteration or a base in the URL fixes that side to one commit.
+const MAX_RECENT_PUSHES = 5;
+
+function chooseCommitCandidates(iterations, iterationId, baseId) {
+  const commits = chooseDiffCommits(iterations, iterationId, baseId);
+  if (!commits) return null;
+  const newestFirst = iterationId ? [] : [...iterations].sort((a, b) => b.id - a.id).slice(0, MAX_RECENT_PUSHES);
+  const candidates = (first, others) => [...new Set([first, ...others].filter(Boolean))];
+  return {
+    new: candidates(commits.new, newestFirst.map(item => item.sourceRefCommit?.commitId)),
+    old: candidates(commits.old, baseId ? [] : newestFirst.map(item => item.commonRefCommit?.commitId))
+  };
+}
+
+const rowsMatchFileLines = (rows, fileLines) => rows.every(row => {
+  const line = fileLines[row.lineNumber - 1];
+  return line && foldNonBreakingSpaces(line.text) === foldNonBreakingSpaces(row.code);
+});
+
+// `rows` holds the visible rows of each side. A side with no rows is not fetched, so an added file fetches no
+// old side. A side takes the first version that has the text of every row, or else the first version found.
+// With `eitherSide`, the rows in `rows.new` may belong to either side: the new side is tried first, then the old
+// side, and `side` in the result names the side that is used.
+async function loadVueFileLines(context, filePaths, rows, eitherSide = false) {
   keepAdoRequestsFor(context);
   const iterations = await fetchFromAdo(
     `${context.apiBase}/pullRequests/${context.pullRequestId}/iterations?api-version=7.1`,
     'application/json',
     response => response.json().then(body => body.value)
   );
-  const commits = chooseDiffCommits(iterations, context.iteration, context.base);
+  const commits = chooseCommitCandidates(iterations, context.iteration, context.base);
   if (!commits) {
     throw new Error(`No commits for iteration ${context.iteration} and base ${context.base}`);
   }
@@ -375,14 +415,28 @@ async function loadVueFileLines(context, filePaths) {
     'text/plain',
     response => response.text()
   ).then(parseVueFileLines).catch(() => null);
-  const [oldLines, newLines] = await Promise.all([
-    loadSide(commits.old, filePaths.old),
-    loadSide(commits.new, filePaths.new)
-  ]);
-  return { old: oldLines, new: newLines };
+  const loadMatchingSide = async (side, sideRows) => {
+    if (!sideRows.length) return { lines: null, matched: false };
+    let firstFound = null;
+    for (const commit of commits[side]) {
+      const fileLines = await loadSide(commit, filePaths[side]);
+      if (!fileLines) continue;
+      if (rowsMatchFileLines(sideRows, fileLines)) return { lines: fileLines, matched: true };
+      firstFound ??= fileLines;
+    }
+    return { lines: firstFound, matched: false };
+  };
+  if (eitherSide) {
+    const asNew = await loadMatchingSide('new', rows.new);
+    const asOld = asNew.matched ? null : await loadMatchingSide('old', rows.new);
+    return asOld?.matched ? { old: asOld.lines, new: null, side: 'old' } : { old: null, new: asNew.lines, side: 'new' };
+  }
+  const [oldSide, newSide] = await Promise.all([loadMatchingSide('old', rows.old), loadMatchingSide('new', rows.new)]);
+  return { old: oldSide.lines, new: newSide.lines };
 }
 
-function getDiffLineLocation(lineElement, fileDiffElement) {
+// `oneFileSide` is the side of every row of a card that shows one file, from getOneFileSide.
+function getDiffLineLocation(lineElement, fileDiffElement, oneFileSide = null) {
   const row = lineElement.closest('.repos-diff-contents-row');
   if (!row) return null;
   const numberElements = row.querySelectorAll('.repos-line-number');
@@ -393,7 +447,7 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
     side = pane.classList.contains('vss-Splitter--pane-fixed') ? 'old' : 'new';
     numberElement = numberElements[0];
   } else {
-    side = lineElement.classList.contains('removed') ? 'old' : 'new';
+    side = oneFileSide || (lineElement.classList.contains('removed') ? 'old' : 'new');
     // An added or deleted file has one number column. Otherwise the first column is old and the second is new.
     numberElement = numberElements.length === 1 ? numberElements[0] : numberElements[side === 'old' ? 0 : 1];
   }
@@ -401,9 +455,15 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
   return Number.isInteger(lineNumber) && lineNumber > 0 ? { side, lineNumber } : null;
 }
 
+// A Files tab card or an Overview comment-thread card. The thread card shows its file as a link and the path below it.
+const FILE_CARD_SELECTOR = '.repos-summary-header, .comment-file-header';
+const THREAD_FILE_LINK_SELECTOR = '.comment-file-header-link';
+
 // The header can show an encoding change before the path, so the new path is the first line that starts
 // with a slash. A renamed file also shows its old path in a "Renamed from" block.
 function getFilePaths(fileDiffElement) {
+  const threadPath = fileDiffElement.querySelector(`${THREAD_FILE_LINK_SELECTOR} + .text-ellipsis`)?.textContent.trim();
+  if (threadPath?.startsWith('/')) return { old: threadPath, new: threadPath };
   const header = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column');
   if (!header) return null;
   const findPath = selector => [...header.querySelectorAll(selector)]
@@ -414,13 +474,46 @@ function getFilePaths(fileDiffElement) {
   return { old: findPath('.body-s.secondary-text.flex-column .text-ellipsis') || newPath, new: newPath };
 }
 
+// An added or deleted file and an Overview thread snippet show one file: no splitter panes and one number column
+// on every row. All rows of such a card are on one side: new with an added row, old with a removed row, and
+// 'either' when every row is unchanged. A card with both kinds of rows, or another card, gives null, and each
+// row then takes the side of its own class.
+function getOneFileSide(fileDiffElement) {
+  if (fileDiffElement.querySelector('.vss-Splitter--pane-fixed, .vss-Splitter--pane-flexible')) return null;
+  const rows = [...fileDiffElement.querySelectorAll('.repos-diff-contents-row')];
+  if (!rows.length || rows.some(row => row.querySelectorAll('.repos-line-number').length !== 1)) return null;
+  const lines = [...fileDiffElement.querySelectorAll(LINE_SELECTOR)];
+  const added = lines.some(line => line.classList.contains('added'));
+  const removed = lines.some(line => line.classList.contains('removed'));
+  if (added && removed) return null;
+  return added ? 'new' : removed ? 'old' : 'either';
+}
+
+// The visible rows of each side. The rows of an 'either' card are held as new rows.
+function getSideRows(fileDiffElement, oneFileSide) {
+  const rowSide = oneFileSide === 'either' ? 'new' : oneFileSide;
+  const rows = { old: [], new: [] };
+  fileDiffElement.querySelectorAll(LINE_SELECTOR).forEach(lineElement => {
+    const location = getDiffLineLocation(lineElement, fileDiffElement, rowSide);
+    if (location) rows[location.side].push({ lineNumber: location.lineNumber, code: getLineCode(lineElement) });
+  });
+  return rows;
+}
+
 async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   const filePaths = getFilePaths(fileDiffElement);
+  const oneFileSide = getOneFileSide(fileDiffElement);
+  const rows = getSideRows(fileDiffElement, oneFileSide);
+  if (!rows.old.length && !rows.new.length) {
+    // The rows of an Overview thread render after its card, and a later pass processes the card again.
+    return highlightLines(fileDiffElement, () => fileLanguage);
+  }
+  const rowsSnapshot = JSON.stringify(rows);
   let fileLines = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
     if (filePaths) {
-      fileLines = await loadVueFileLines(context, filePaths);
+      fileLines = await loadVueFileLines(context, filePaths, rows, oneFileSide === 'either');
     }
   } catch (error) {
     console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
@@ -430,12 +523,15 @@ async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   if (!fileDiffElement.isConnected) {
     return;
   }
-  if (getPullRequestContext(window.location)?.key !== context.key || getFilePaths(fileDiffElement)?.new !== filePaths?.new) {
-    // The URL or the file shown in this card changed during the fetch, and a pass skipped the card while it was in flight.
+  if (getPullRequestContext(window.location)?.key !== context.key || getFilePaths(fileDiffElement)?.new !== filePaths?.new ||
+    JSON.stringify(getSideRows(fileDiffElement, getOneFileSide(fileDiffElement))) !== rowsSnapshot) {
+    // The URL, the file shown in this card or its rows changed during the fetch, and a pass skipped the card while
+    // it was in flight. The fetched versions stay cached, so the second choice costs few requests.
     return processFileDiff(fileDiffElement);
   }
+  const lineSide = fileLines.side || (oneFileSide === 'either' ? 'new' : oneFileSide);
   const getFileLine = lineElement => {
-    const location = getDiffLineLocation(lineElement, fileDiffElement);
+    const location = getDiffLineLocation(lineElement, fileDiffElement, lineSide);
     return (location && fileLines[location.side]?.[location.lineNumber - 1]) || null;
   };
   highlightLines(fileDiffElement, lineElement => getFileLine(lineElement)?.language || fileLanguage, getFileLine);
@@ -446,7 +542,7 @@ function processFileDiff(fileDiffElement) {
     return;
   }
 
-  let fileNameElement = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column .text-ellipsis');
+  let fileNameElement = fileDiffElement.querySelector(`.repos-change-summary-file-icon-container + .flex-column .text-ellipsis, ${THREAD_FILE_LINK_SELECTOR}`);
 
   const fileName = fileNameElement ? fileNameElement.textContent.trim() : null;
   const language = getLanguageFromFileName(fileName);
@@ -461,22 +557,31 @@ function processFileDiff(fileDiffElement) {
   highlightLines(fileDiffElement, () => language);
 }
 
+const LINE_SELECTOR = '.monospaced-text > .repos-line-content';
+const NON_CODE_QUERY = '.screen-reader-only, span[aria-hidden="true"]';
+
+// A copy of a row with only its code, without the screen reader text and the line icon.
+function cloneLineCode(lineElement) {
+  const codeContainer = lineElement.cloneNode(true);
+  codeContainer.querySelectorAll(NON_CODE_QUERY).forEach(el => el.remove());
+  return codeContainer;
+}
+
+const getLineCode = lineElement => cloneLineCode(lineElement).textContent;
+
 function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => null) {
-  let originalLineElements = fileDiffElement.querySelectorAll('.monospaced-text > .repos-line-content');
+  let originalLineElements = fileDiffElement.querySelectorAll(LINE_SELECTOR);
 
   originalLineElements.forEach(originalLineElement => {
     if (!originalLineElement.classList.contains('ado-syntax-highlighted')) {
       const language = getLineLanguage(originalLineElement);
 
       const elementsToPreserve = [];
-      const nonCodeQuery = '.screen-reader-only, span[aria-hidden="true"]';
-      originalLineElement.querySelectorAll(nonCodeQuery).forEach(el => {
+      originalLineElement.querySelectorAll(NON_CODE_QUERY).forEach(el => {
         elementsToPreserve.push(el.cloneNode(true));
       });
 
-      const codeContainer = originalLineElement.cloneNode(true);
-      codeContainer.querySelectorAll(nonCodeQuery).forEach(el => el.remove());
-      const codeToHighlight = codeContainer.innerHTML;
+      const codeToHighlight = cloneLineCode(originalLineElement).innerHTML;
 
       const highlightedLine = originalLineElement.cloneNode(true);
 
@@ -574,8 +679,9 @@ function applySyntaxHighlighting() {
   }
 
   console.debug("ADO Syntax Highlighter: Applying...");
+  forgetIterationsLists();
 
-  const fileDiffPanels = document.querySelectorAll('.repos-summary-header');
+  const fileDiffPanels = document.querySelectorAll(FILE_CARD_SELECTOR);
   fileDiffPanels.forEach(fileDiffPanel => {
     processFileDiff(fileDiffPanel);
   });

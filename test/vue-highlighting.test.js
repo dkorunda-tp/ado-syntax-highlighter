@@ -385,7 +385,7 @@ test('a file removed from the page while its fetch is in flight is left alone', 
   assert.equal(highlightCalls.length, 0);
 });
 
-test('one iterations fetch per PR and one file fetch per commit and path', async () => {
+test('one iterations fetch per pass and one file fetch per commit and path', async () => {
   const server = standardServer({
     files: {
       [`common2:${PATH}`]: OLD_TEXT,
