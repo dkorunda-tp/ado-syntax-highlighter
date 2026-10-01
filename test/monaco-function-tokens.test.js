@@ -1,12 +1,13 @@
-// Function calls in the single-file view: the bridge's copies of Monaco's typescript, javascript and csharp
-// grammars give a call a function token. Runs on the real monaco-editor 0.29 build, whose own grammars load
-// lazily, the first time a language is used, as in ADO.
+// Prism token types in the single-file view: the bridge's copies of Monaco's typescript, javascript, csharp and
+// css grammars give calls, names assigned a function, CSS function names, operators and booleans the token types
+// that Prism gives them. Runs on the real monaco-editor 0.29 build, whose own grammars load lazily, the first time
+// a language is used, as in ADO.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM, VirtualConsole } = require('jsdom');
-const { loadRealMonaco, waitFor, tokenizeLines, waitForEmbeddedGrammars, renderedColors, coloredPieces } = require('./monaco-helpers');
+const { loadRealMonaco, waitFor, settle, tokenizeLines, waitForEmbeddedGrammars, renderedColors, coloredPieces } = require('./monaco-helpers');
 
 const LANGUAGES = ['typescript', 'javascript', 'csharp'];
 const POSTFIX = { typescript: 'ts', javascript: 'js', csharp: 'cs' };
@@ -37,13 +38,59 @@ function prismPieces(Prism, line, language) {
   return pieces;
 }
 
-// A function token in Prism: a call, or a name that is assigned a function (`function-variable`).
-function isPrismCall(pieces, offset) {
-  const { types } = pieces.find(piece => piece.start <= offset && offset < piece.end);
-  return types.includes('function');
+// The types of Prism's token at `offset`.
+function prismTypesAt(pieces, offset) {
+  return pieces.find(piece => piece.start <= offset && offset < piece.end).types;
+}
+
+// A function token in Prism: a call, a name that is assigned a function (`function-variable`) or a CSS function.
+function isPrismFunction(pieces, offset) {
+  return prismTypesAt(pieces, offset).includes('function');
 }
 
 const WORD_TOKEN = /^(?:identifier|keyword|type\.identifier|function)(?:\.|$)/;
+
+// Runs `check(token, offset, pieces, text)` on each Monaco token of `lines` and returns its mismatches, each with
+// its line. Prism reads one line at a time, as the multi-file view highlights a row, or with `wholeBlock` all the
+// lines as one text, as it highlights a .vue block. `offset` is the token's place in Prism's text.
+function prismMismatches(Prism, language, lines, tokenLines, check, { wholeBlock = false } = {}) {
+  const blockText = lines.join('\n');
+  const blockPieces = wholeBlock ? prismPieces(Prism, blockText, language) : null;
+  const mismatches = [];
+  let lineStart = 0;
+  tokenLines.forEach((tokens, index) => {
+    const text = wholeBlock ? blockText : lines[index];
+    const pieces = blockPieces ?? prismPieces(Prism, text, language);
+    let offset = wholeBlock ? lineStart : 0;
+    for (const token of tokens) {
+      for (const mismatch of check(token, offset, pieces, text)) mismatches.push(`${mismatch} in: ${lines[index]}`);
+      offset += token.text.length;
+    }
+    lineStart += lines[index].length + 1;
+  });
+  return mismatches;
+}
+
+// A name whose function token differs from Prism's.
+function functionMismatches(token, offset, pieces) {
+  const monacoFunction = token.type.startsWith('function.');
+  return WORD_TOKEN.test(token.type) && monacoFunction !== isPrismFunction(pieces, offset) ? [`${token.text} (${token.type})`] : [];
+}
+
+// Each character, apart from whitespace, whose operator or boolean token differs from Prism's.
+function operatorAndBooleanMismatches(token, offset, pieces, text) {
+  const mismatches = [];
+  for (let char = offset; char < offset + token.text.length; char++) {
+    if (/\s/.test(text[char])) continue;
+    const types = prismTypesAt(pieces, char);
+    for (const kind of ['operator', 'boolean']) {
+      if (token.type.startsWith(`${kind}.`) !== types.includes(kind)) {
+        mismatches.push(`${kind} "${text[char]}" at ${char} (${token.type}, Prism ${types.join('/') || 'plain'})`);
+      }
+    }
+  }
+  return mismatches;
+}
 
 function tokenize(monaco, text, language) {
   return tokenizeLines(monaco, text.split('\n'), language);
@@ -75,10 +122,6 @@ function recordAdoGrammarLoads(monaco) {
     return setLanguageConfiguration(languageId, configuration);
   };
   return loaded;
-}
-
-function settle(window) {
-  return new Promise(resolve => window.setTimeout(resolve, 50));
 }
 
 async function waitForCallTokens(monaco, languages = LANGUAGES) {
@@ -174,7 +217,7 @@ test('function calls', async t => {
 });
 
 // TypeScript syntax is also valid input for the javascript grammars, so one corpus serves both.
-const SCRIPT_CALLS = [
+const SCRIPT_FUNCTIONS = [
   'const total = formatDollars(x) + a.b.c(1) + pad (2);',
   'map.get(k); map.set(k, v); const list = Array.from(items); obj.delete(k); obj.default(1); obj.type(2); obj.is(3);',
   'p.then(done).catch(fail).finally(end);',
@@ -270,36 +313,20 @@ test('an operator or a boolean has its token where Prism shows one', async t => 
   LANGUAGES.forEach(language => hasCallTokens(monaco, language));
   await waitForCallTokens(monaco);
   const corpora = {
-    typescript: [...SCRIPT_OPERATORS, ...TYPESCRIPT_OPERATORS, ...SCRIPT_CALLS],
-    javascript: [...SCRIPT_OPERATORS, ...SCRIPT_CALLS],
+    typescript: [...SCRIPT_OPERATORS, ...TYPESCRIPT_OPERATORS, ...SCRIPT_FUNCTIONS],
+    javascript: [...SCRIPT_OPERATORS, ...SCRIPT_FUNCTIONS],
     csharp: [...CSHARP_OPERATORS, ...CSHARP_CALLS]
   };
 
   for (const [language, corpus] of Object.entries(corpora)) {
-    const mismatches = [];
-    tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
-      const pieces = prismPieces(Prism, corpus[index], language);
-      let offset = 0;
-      for (const token of tokens) {
-        for (let char = offset; char < offset + token.text.length; char++) {
-          if (/\s/.test(corpus[index][char])) continue;
-          const { types } = pieces.find(piece => piece.start <= char && char < piece.end);
-          for (const kind of ['operator', 'boolean']) {
-            if (token.type.startsWith(`${kind}.`) !== types.includes(kind)) {
-              mismatches.push(`${kind} "${corpus[index][char]}" at ${char} (${token.type}, Prism ${types.join('/') || 'plain'}) in: ${corpus[index]}`);
-            }
-          }
-        }
-        offset += token.text.length;
-      }
-    });
-    assert.deepEqual(mismatches, [], language);
+    const tokenLines = tokenize(monaco, corpus.join('\n'), language);
+    assert.deepEqual(prismMismatches(Prism, language, corpus, tokenLines, operatorAndBooleanMismatches), [], language);
   }
 });
 
 // Each name in the corpus is a function token in Monaco exactly where Prism tokenizes it as a function, one
 // line at a time as the multi-file view highlights a row.
-test('a call has the function token where Prism shows a function', async t => {
+test('a name has the function token where Prism shows a function', async t => {
   const page = await loadRealMonaco();
   t.after(() => page.close());
   const { monaco } = page;
@@ -307,20 +334,9 @@ test('a call has the function token where Prism shows a function', async t => {
   LANGUAGES.forEach(language => hasCallTokens(monaco, language));
   await waitForCallTokens(monaco);
 
-  for (const [language, corpus] of [['typescript', SCRIPT_CALLS], ['javascript', SCRIPT_CALLS], ['csharp', CSHARP_CALLS]]) {
-    const mismatches = [];
-    tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
-      const pieces = prismPieces(Prism, corpus[index], language);
-      let offset = 0;
-      for (const token of tokens) {
-        const monacoCall = token.type.startsWith('function.');
-        if (WORD_TOKEN.test(token.type) && monacoCall !== isPrismCall(pieces, offset)) {
-          mismatches.push(`${token.text} (${token.type}) in: ${corpus[index]}`);
-        }
-        offset += token.text.length;
-      }
-    });
-    assert.deepEqual(mismatches, [], language);
+  for (const [language, corpus] of [['typescript', SCRIPT_FUNCTIONS], ['javascript', SCRIPT_FUNCTIONS], ['csharp', CSHARP_CALLS]]) {
+    const tokenLines = tokenize(monaco, corpus.join('\n'), language);
+    assert.deepEqual(prismMismatches(Prism, language, corpus, tokenLines, functionMismatches), [], language);
   }
 });
 
@@ -352,26 +368,8 @@ test('a Vue macro whose generic spans lines is a call and a new before a line br
     'const onSave = async (id: number) => emit(\'change\', id);'
   ];
   const lines = tokenizeLines(monaco, ['<script setup lang="ts">', ...script, '</script>']).slice(1, -1);
-  const pieces = prismPieces(Prism, script.join('\n'), 'typescript');
-  let offset = 0;
-  const mismatches = [];
-  const text = script.join('\n');
-  lines.forEach((tokens, index) => {
-    for (const token of tokens) {
-      if (WORD_TOKEN.test(token.type) && token.type.startsWith('function.') !== isPrismCall(pieces, offset)) {
-        mismatches.push(`${token.text} (${token.type}) in: ${script[index]}`);
-      }
-      for (let char = offset; char < offset + token.text.length; char++) {
-        if (/\s/.test(text[char])) continue;
-        const { types } = pieces.find(piece => piece.start <= char && char < piece.end);
-        for (const kind of ['operator', 'boolean']) {
-          if (token.type.startsWith(`${kind}.`) !== types.includes(kind)) mismatches.push(`${kind} "${text[char]}" in: ${script[index]}`);
-        }
-      }
-      offset += token.text.length;
-    }
-    offset++;
-  });
+  const mismatches = [functionMismatches, operatorAndBooleanMismatches]
+    .flatMap(check => prismMismatches(Prism, 'typescript', script, lines, check, { wholeBlock: true }));
 
   assert.deepEqual(mismatches, []);
   for (const [index, name] of [[0, 'defineProps'], [3, 'defineEmits'], [6, 'defineModel']]) {
@@ -396,8 +394,9 @@ const SCSS_CALLS = [
   '$x: rgba(0, 0, 0, 0.5);'
 ];
 
-// A function name in the css and scss copies has the Prism function color where Prism shows a function. Monaco's
-// scss grammar gives a call one meta token, which also takes the function color, so only names are compared.
+// A function name in the bridge's css copy and in Monaco's own scss grammar has the Prism function color where
+// Prism shows a function. The scss grammar gives a call one meta token, which also takes the function color, so
+// only names are compared.
 test('a css or scss function name has the function color where Prism shows a function', async t => {
   const page = await loadRealMonaco();
   t.after(() => page.close());
@@ -412,22 +411,14 @@ test('a css or scss function name has the function color where Prism shows a fun
   // url its own url type where Monaco's meta token shows the function color, reads the pseudo-class of a selector
   // with parentheses as a function, and shows functions in at-rule headers, which Monaco's scss grammar reads as tags.
   const scssCorpus = [...STYLE_CALLS.filter(line => !/url\(|:not\(|^@/.test(line)), ...SCSS_CALLS];
+  const nameMismatches = (token, offset, pieces) => [...token.text].flatMap((char, index) => (
+    /[-\w]/.test(char) && functionColored(token.type) !== isPrismFunction(pieces, offset + index)
+      ? [`"${char}" at ${offset + index} (${token.type})`]
+      : []
+  ));
   for (const [language, corpus] of [['css', STYLE_CALLS], ['scss', scssCorpus]]) {
-    const mismatches = [];
-    tokenize(monaco, corpus.join('\n'), language).forEach((tokens, index) => {
-      const pieces = prismPieces(Prism, corpus[index], language);
-      let offset = 0;
-      for (const token of tokens) {
-        for (let char = offset; char < offset + token.text.length; char++) {
-          if (!/[-\w]/.test(corpus[index][char])) continue;
-          if (functionColored(token.type) !== isPrismCall(pieces, char)) {
-            mismatches.push(`"${corpus[index][char]}" at ${char} (${token.type}) in: ${corpus[index]}`);
-          }
-        }
-        offset += token.text.length;
-      }
-    });
-    assert.deepEqual(mismatches, [], language);
+    const tokenLines = tokenize(monaco, corpus.join('\n'), language);
+    assert.deepEqual(prismMismatches(Prism, language, corpus, tokenLines, nameMismatches), [], language);
   }
 });
 
@@ -563,14 +554,15 @@ const ALLOWED_CHANGES = [
   [/^delimiter\./, /^(?:delimiter\.|$)/]
 ];
 
-// Monaco's own grammars on the left, the bridge's copies on the right: only a call changes, from an identifier,
-// a keyword or a type name to function, and every token keeps its offset.
-test('every other token is the same as in Monaco\'s own grammar', async t => {
+// Monaco's own grammars on the left, the bridge's copies on the right, character by character: only the changes
+// in ALLOWED_CHANGES happen (a call or a name assigned a function becomes a function, operators, booleans and C#
+// punctuation), and every character keeps its place.
+test('every token outside the Prism token changes is the same as in Monaco\'s own grammar', async t => {
   const page = await loadRealMonaco({ bridge: 'none' });
   t.after(() => page.close());
   const { monaco } = page;
   const scripts = ['monaco_bridge.js', 'content_script.js'].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
-  const scriptSample = [TYPESCRIPT_SAMPLE, ...SCRIPT_CALLS, ...SCRIPT_OPERATORS, ...TYPESCRIPT_OPERATORS, scripts].join('\n');
+  const scriptSample = [TYPESCRIPT_SAMPLE, ...SCRIPT_FUNCTIONS, ...SCRIPT_OPERATORS, ...TYPESCRIPT_OPERATORS, scripts].join('\n');
   const samples = {
     typescript: scriptSample,
     javascript: scriptSample,

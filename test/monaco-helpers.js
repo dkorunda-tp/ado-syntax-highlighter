@@ -256,6 +256,11 @@ async function waitFor(check, what, errors = []) {
   }
 }
 
+// Waits on the page's own timer, so its pending timers and microtasks run first.
+function settle(window, ms = 50) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
 // The tokens of one line with their text. Monaco merges neighbors of the same type, so a quoted value is one token.
 function lineTokens(tokens, line) {
   return Array.from(tokens, (token, index) => {
@@ -312,6 +317,7 @@ module.exports = {
   vueLanguageCalls,
   loadRealMonaco,
   waitFor,
+  settle,
   tokenizeLines,
   languagesOf,
   waitForEmbeddedGrammars,

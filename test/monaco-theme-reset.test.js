@@ -3,7 +3,7 @@
 // writing the plain stylesheet text back into style.monaco-colors, on the real monaco-editor 0.29 build.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadRealMonaco } = require('./monaco-helpers');
+const { loadRealMonaco, settle } = require('./monaco-helpers');
 
 const PAYLOAD = {
   vs: { function: { foreground: '#654321', fontStyle: '' }, keyword: { foreground: '#123456', fontStyle: '' } },
@@ -13,10 +13,6 @@ const PAYLOAD = {
 function colorSheet(window) {
   const sheets = window.document.querySelectorAll('style.monaco-colors');
   return sheets[sheets.length - 1];
-}
-
-function settle(window, ms = 50) {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
 // An editor on the page gives the active theme through its class, as in ADO. Returns the plain vs stylesheet.
