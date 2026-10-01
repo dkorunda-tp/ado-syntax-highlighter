@@ -42,8 +42,9 @@
     constant: ['constant'],
     namespace: ['namespace'],
     doctype: ['metatag', 'metatag.html', 'metatag.xml', 'metatag.content.html'],
-    // `function` is the call token of the bridge's typescript, javascript and csharp grammars. Monaco's scss
-    // grammar gives a function call such as `darken(` one meta token, and sql its built-ins predefined.
+    // `function` is the token of the bridge's grammars for a call, a name that is assigned a function and a CSS
+    // function name. Monaco's scss grammar gives a function call such as `darken(` one meta token, and sql its
+    // built-ins predefined.
     function: ['function', 'meta.scss', 'predefined.sql']
   };
 
@@ -163,10 +164,10 @@
 
   /*
    * The typescript, javascript, csharp and css grammars below are copied from monaco-editor 0.29.1
-   * (esm/vs/basic-languages). The only change is the parts marked "Added": a call, an operator and true or false
-   * get the function, operator and boolean tokens, where Prism's grammar of the same language gives those types.
-   * The patterns and word lists of the Added parts are
-   * taken from the bundled Prism 1.30.0 (prism/prism.js), under the same MIT license.
+   * (esm/vs/basic-languages). The only change is the parts marked "Added": a call, a name that is assigned a
+   * function, a CSS function name, an operator and true or false get the function, operator and boolean tokens,
+   * where Prism's grammar of the same language gives those types. The patterns and word lists of the Added parts
+   * are taken from the bundled Prism 1.30.0 (prism/prism.js), under the same MIT license.
    *
    * Copyright (c) 2016 - present Microsoft Corporation
    * Prism: Copyright (c) 2012 Lea Verou
@@ -190,17 +191,18 @@
    * SOFTWARE.
    */
 
-  // Added. The call rules of the typescript and javascript copies follow Prism's typescript and javascript
+  // Added. The Prism token rules of the typescript and javascript copies follow Prism's typescript and javascript
   // grammars. A name is a call before `(`, and in TypeScript also before `<...>(`, `.call(`, `.apply(` or
   // `.bind(`. It is not a call where Prism shows a keyword, a constant (capitals only) or, in JavaScript, a
   // built-in class. After `.` fewer names are keywords, and after `new`, `class` and the like a name is a class.
-  // A name that is not a call keeps the token of Monaco's own grammar, except that true and false are booleans.
-  // The same rules make `...`, `?.` and TypeScript's decorator `@` operators, as in Prism.
+  // A name that is assigned a function is a function too. Any other name keeps the token of Monaco's own grammar,
+  // except that true and false are booleans. The same rules make `...`, `?.` and TypeScript's decorator `@`
+  // operators, as in Prism.
   const SCRIPT_NAME_TOKEN = {
     cases: { '~[A-Z].*': 'type.identifier', '~false|true': 'boolean', '@keywords': 'keyword', '@default': 'identifier' }
   };
 
-  function scriptCallRules({ classKeywords, typescript = false, classNames = null }) {
+  function scriptPrismTokenRules({ classKeywords, typescript = false, classNames = null }) {
     const call = typescript ? '(?=\\s*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\\s*|\\.\\s*(?:apply|bind|call)\\s*)?\\()' : '(?=\\s*\\()';
     const callToken = keywordList => ({
       cases: {
@@ -255,9 +257,9 @@
       { include: '@whitespace' },
       [/\/(?=([^\\\/]|\\.)+\/([dgimsuy]*)(\s*)(\.|;|,|\)|\]|\}|$))/, { token: 'regexp', bracket: '@open', next: '@regexp' }],
       [/[()\[\]]/, '@brackets'],
-      // Added: the next three rules give `operator`, where Prism does, in place of '@brackets', 'delimiter' and
-      // the operator cases. `?.` is one operator, as in Prism.
-      [/[<>](?!@symbols)/, 'operator'],
+      // Added: every symbol run, `<` and `>` included, is an `operator`, where Prism shows one. This takes the place
+      // of the '@brackets' rule for `<` and `>` and of the operator cases. A lone `!` keeps its own rule, so a
+      // regex right after it still starts, and is an operator too. `?.` is one operator, as in Prism.
       [/!(?=([^=]|$))/, 'operator'],
       [/\?\./, 'operator'],
       [/@symbols/, 'operator'],
@@ -372,7 +374,7 @@
       ...scriptTokenizer,
       // Added.
       common: [
-        ...scriptCallRules({ classKeywords: 'class|extends|implements|instanceof|interface|new|type', typescript: true }),
+        ...scriptPrismTokenRules({ classKeywords: 'class|extends|implements|instanceof|interface|new|type', typescript: true }),
         ...scriptTokenizer.common
       ],
       // Added.
@@ -408,7 +410,7 @@
       ...scriptTokenizer,
       // Added.
       common: [
-        ...scriptCallRules({
+        ...scriptPrismTokenRules({
           classKeywords: 'class|extends|implements|instanceof|interface|new',
           classNames: '(?:(?:Float(?:32|64)|(?:Int|Uint)(?:8|16|32)|Uint8Clamped)?Array|ArrayBuffer|BigInt|Boolean|DataView'
             + '|Date|Error|Function|Intl|JSON|(?:Weak)?(?:Map|Set)|Math|Number|Object|Promise|Proxy|Reflect|RegExp|String'
@@ -430,6 +432,15 @@
     '@namespaceFollows': { token: 'keyword.$0', next: '@namespace' },
     '@keywords': { token: 'keyword.$0', next: '@qualified' }
   };
+  // Added. A name as Monaco's own grammar reads it where an expression starts: then a qualified name follows.
+  const CSHARP_ROOT_NAME_CASES = { ...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } };
+  // Added. A name as Monaco's own grammar reads it inside a qualified name.
+  const CSHARP_NAME_TOKEN = { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } };
+  // Added. The hole of an interpolated string, as root with a `:` that starts the format (see the hole states).
+  const CSHARP_INTERPOLATION_HOLE = [
+    [/:(?=[^}"()]*\})/, { token: 'delimiter', next: '@interpolationFormat' }],
+    { include: '@root' }
+  ];
 
   // Added. An attribute starts at `[` before a name at the start of a line, after `(` or after `,`, as in Prism,
   // but not inside the hole of an interpolated string, whose closing brace must still end the hole.
@@ -486,6 +497,8 @@
       'where', 'while', 'yield'
     ],
     generic: /<(?:[^<>;=+\-*\/%&|^]|<(?:[^<>;=+\-*\/%&|^]|<[^<>;=+\-*\/%&|^]*>)*>)*>/,
+    // What follows a call name: `(` right after it, or type arguments and then `(`.
+    callFollows: /(?=\(|\s*@generic\s*\()/,
     // The first attribute after `[`, as Prism reads one: an optional target, a name, optional generic arguments and
     // arguments, then `,` or `]` on the same line.
     attributeHead: /[ \t]*(?:[a-z]+[ \t]*:[ \t]*)?@?[a-zA-Z_][\w.]*(?:[ \t]*@generic)?[ \t]*(?:\((?:@attributeText|\((?:@attributeText|\((?:@attributeText)*\))*\))*\))?[ \t]*[,\]]/,
@@ -503,10 +516,10 @@
           '',
           { cases: { '@keywords': { token: 'keyword.$3', next: '@qualified' }, '@default': { token: 'identifier', next: '@qualified' } } }
         ]],
-        [/\@?[a-zA-Z_]\w*(?=\(|\s*@generic\s*\()/, {
+        [/\@?[a-zA-Z_]\w*@callFollows/, {
           cases: {
             '@namespaceFollows': csharpIdentifierCases['@namespaceFollows'],
-            '@callKeywords': { cases: { ...csharpIdentifierCases, '@default': { token: 'identifier', next: '@qualified' } } },
+            '@callKeywords': { cases: CSHARP_ROOT_NAME_CASES },
             '@default': { token: 'function', next: '@qualified' }
           }
         }],
@@ -515,8 +528,7 @@
           cases: {
             new: { token: 'keyword.$0', next: '@constructed' },
             '~false|true': { token: 'boolean', next: '@qualified' },
-            ...csharpIdentifierCases,
-            '@default': { token: 'identifier', next: '@qualified' }
+            ...CSHARP_ROOT_NAME_CASES
           }
         }],
         { include: '@whitespace' },
@@ -528,10 +540,9 @@
           }
         }],
         [/[{}()\[\]]/, '@brackets'],
-        // Added: the next four rules take Prism's types in place of '@brackets' and the operator cases: `?`, `:`
-        // and `::` are punctuation, `??` and every other symbol is an operator. The `<` and `>` of type arguments
-        // are punctuation (see typeArguments).
-        [/[<>](?!@symbols)/, 'operator'],
+        // Added: the next four rules take Prism's types in place of the '@brackets' rule for `<` and `>` and the
+        // operator cases: `?`, `:` and `::` are punctuation, `??` and every other symbol, `<` and `>` included, is
+        // an operator. The `<` and `>` of type arguments are punctuation (see typeArguments).
         // A symbol run with `//` or `/*` inside, such as :// or ?//, stays one run with the original token, as in
         // Monaco's own grammar; split, its `//` would start a comment.
         [/(?=[=><!~?:&|+\-*\/\^%]*(?:\/\/|\/\*))@symbols/, { cases: { '@operators': 'delimiter', '@default': '' } }],
@@ -554,12 +565,7 @@
       ],
       qualified: [
         // Added.
-        [/[a-zA-Z_][\w]*(?=\(|\s*@generic\s*\()/, {
-          cases: {
-            '@callKeywords': { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } },
-            '@default': 'function'
-          }
-        }],
+        [/[a-zA-Z_][\w]*@callFollows/, { cases: { '@callKeywords': CSHARP_NAME_TOKEN, '@default': 'function' } }],
         [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
         // Added: a range `..` after a name, as in s[a..b], is an operator.
         [/\.\./, { token: 'operator', next: '@pop' }],
@@ -570,19 +576,13 @@
         [/(?=@generic)</, { token: 'delimiter.angle', switchTo: '@typeArguments' }],
         ['', '', '@pop']
       ],
-      // Added. The format of an interpolation hole: its symbols keep the delimiter token, and the closing brace is
-      // left to the hole.
       // Added. The hole of an interpolated string: root, and before it a `:` that starts the format, as in
       // {date:yyyy-MM-dd} or {date://yyyy}, where Prism reads the format as one format-string token with no
       // operator. The state names are the ones the original grammar pushes, so its `$S2` checks still hold.
-      'root.interpolatedstring': [
-        [/:(?=[^}"()]*\})/, { token: 'delimiter', next: '@interpolationFormat' }],
-        { include: '@root' }
-      ],
-      'root.litinterpstring': [
-        [/:(?=[^}"()]*\})/, { token: 'delimiter', next: '@interpolationFormat' }],
-        { include: '@root' }
-      ],
+      'root.interpolatedstring': CSHARP_INTERPOLATION_HOLE,
+      'root.litinterpstring': CSHARP_INTERPOLATION_HOLE,
+      // Added. The format of an interpolation hole: its symbols keep the delimiter token, and the closing brace is
+      // left to the hole.
       interpolationFormat: [
         [/(?=\})/, '', '@pop'],
         [/[=><!~&|+\-*\/\^%]+/, 'delimiter'],
@@ -601,7 +601,7 @@
         ['', '', '@pop']
       ],
       typeName: [
-        [/[a-zA-Z_][\w]*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
+        [/[a-zA-Z_][\w]*/, CSHARP_NAME_TOKEN],
         [/\./, 'delimiter'],
         // Prism reads the type arguments after `new` as a type only before `(`, `[` or `{` on the same line.
         [/(?=@generic\s*[(\[{])</, { token: 'delimiter.angle', switchTo: '@typeArguments' }],
@@ -612,7 +612,7 @@
       // the line or comes before `,` or `]`, so nested parentheses need no state of their own.
       attribute: [
         [/\@?[a-zA-Z_]\w*(?=\s*@generic\s*\()/, { token: 'function', next: '@qualified' }],
-        [/\@?[a-zA-Z_]\w*/, { cases: { '@keywords': { token: 'keyword.$0' }, '@default': 'identifier' } }],
+        [/\@?[a-zA-Z_]\w*/, CSHARP_NAME_TOKEN],
         [/\(/, { token: 'delimiter.parenthesis', next: '@attributeArguments' }],
         [/(\])([ \t]*)(\[)(?=@attributeHead)/, ['delimiter.square', '', 'delimiter.square']],
         [/\]/, { token: 'delimiter.square', next: '@pop' }],
@@ -815,7 +815,7 @@
     }
   };
 
-  const CALL_GRAMMARS = { typescript: typescriptLanguage, javascript: javascriptLanguage, csharp: csharpLanguage, css: cssLanguage };
+  const PRISM_TOKEN_GRAMMARS = { typescript: typescriptLanguage, javascript: javascriptLanguage, csharp: csharpLanguage, css: cssLanguage };
 
   let monaco = null;
   let startedLate = false;
@@ -1050,10 +1050,10 @@
   // copy is registered after ADO's. When colorize() fails, ADO's grammar did not load, and no copy is registered.
   // A language that is not registered yet is handled on its first use. After a late start, a registered language
   // is handled at once: Monaco reports a first use only once, and it may have happened already.
-  function startCallGrammars() {
+  function startPrismTokenGrammars() {
     const { languages, editor } = monaco;
     if (!hasFunctions(languages, ['getLanguages', 'onLanguage', 'setMonarchTokensProvider']) || !hasFunctions(editor, ['colorize'])) return;
-    for (const [languageId, grammar] of Object.entries(CALL_GRAMMARS)) {
+    for (const [languageId, grammar] of Object.entries(PRISM_TOKEN_GRAMMARS)) {
       const register = guarded(() => languages.setMonarchTokensProvider(languageId, grammar));
       const registerAfterAdoGrammar = () => {
         Promise.resolve().then(() => editor.colorize('', languageId, {})).then(register, () => {});
@@ -1076,7 +1076,7 @@
       }), 0)));
     }
     applyTheme();
-    guarded(startCallGrammars)();
+    guarded(startPrismTokenGrammars)();
     guarded(startVueLanguage)();
   }
 
