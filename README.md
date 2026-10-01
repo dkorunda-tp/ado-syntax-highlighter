@@ -65,11 +65,11 @@ A browser extension that brings syntax highlighting to file diffs in Azure DevOp
 
 ## Usage
 
-Once installed, the extension will automatically apply syntax highlighting to files in any Azure DevOps pull request you view. There are no additional steps required.
+Once installed, the extension will automatically apply syntax highlighting to files in any Azure DevOps pull request you view. There are no additional steps required. This includes the code that comment threads show on the Overview tab.
 
 ### Vue Single-File Components
 
-In the Files view of a pull request, each line of a `.vue` file gets the language of its block:
+In the Files view of a pull request and in the comment threads on its Overview tab, each line of a `.vue` file gets the language of its block:
 
 | Block | Language |
 |---|---|

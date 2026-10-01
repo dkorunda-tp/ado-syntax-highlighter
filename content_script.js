@@ -401,9 +401,15 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
   return Number.isInteger(lineNumber) && lineNumber > 0 ? { side, lineNumber } : null;
 }
 
+// A Files tab card or an Overview comment-thread card. The thread card shows its file as a link and the path below it.
+const FILE_CARD_SELECTOR = '.repos-summary-header, .comment-file-header';
+const THREAD_FILE_LINK_SELECTOR = '.comment-file-header-link';
+
 // The header can show an encoding change before the path, so the new path is the first line that starts
 // with a slash. A renamed file also shows its old path in a "Renamed from" block.
 function getFilePaths(fileDiffElement) {
+  const threadPath = fileDiffElement.querySelector(`${THREAD_FILE_LINK_SELECTOR} + .text-ellipsis`)?.textContent.trim();
+  if (threadPath?.startsWith('/')) return { old: threadPath, new: threadPath };
   const header = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column');
   if (!header) return null;
   const findPath = selector => [...header.querySelectorAll(selector)]
@@ -446,7 +452,7 @@ function processFileDiff(fileDiffElement) {
     return;
   }
 
-  let fileNameElement = fileDiffElement.querySelector('.repos-change-summary-file-icon-container + .flex-column .text-ellipsis');
+  let fileNameElement = fileDiffElement.querySelector(`.repos-change-summary-file-icon-container + .flex-column .text-ellipsis, ${THREAD_FILE_LINK_SELECTOR}`);
 
   const fileName = fileNameElement ? fileNameElement.textContent.trim() : null;
   const language = getLanguageFromFileName(fileName);
@@ -575,7 +581,7 @@ function applySyntaxHighlighting() {
 
   console.debug("ADO Syntax Highlighter: Applying...");
 
-  const fileDiffPanels = document.querySelectorAll('.repos-summary-header');
+  const fileDiffPanels = document.querySelectorAll(FILE_CARD_SELECTOR);
   fileDiffPanels.forEach(fileDiffPanel => {
     processFileDiff(fileDiffPanel);
   });
