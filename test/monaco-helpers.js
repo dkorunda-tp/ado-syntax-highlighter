@@ -256,6 +256,11 @@ async function waitFor(check, what, errors = []) {
   }
 }
 
+// Waits on the page's own timer, so its pending timers and microtasks run first.
+function settle(window, ms = 50) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
 // The tokens of one line with their text. Monaco merges neighbors of the same type, so a quoted value is one token.
 function lineTokens(tokens, line) {
   return Array.from(tokens, (token, index) => {
@@ -264,22 +269,40 @@ function lineTokens(tokens, line) {
   });
 }
 
-function tokenizeLines(monaco, lines) {
-  return Array.from(monaco.editor.tokenize(lines.join('\n'), 'vue'), (tokens, index) => lineTokens(tokens, lines[index]));
+function tokenizeLines(monaco, lines, language = 'vue') {
+  return Array.from(monaco.editor.tokenize(lines.join('\n'), language), (tokens, index) => lineTokens(tokens, lines[index]));
 }
 
 function languagesOf(line) {
   return [...new Set(line.map(token => token.language))];
 }
 
-// Embedded grammars load on first use, so tokenize until TypeScript, CSS and SCSS all answer.
+// Embedded grammars load on first use, so tokenize until TypeScript, CSS and SCSS all answer. The bridge's
+// TypeScript grammar replaces ADO's after that load, and only the bridge's grammar has function tokens.
 async function waitForEmbeddedGrammars(monaco) {
-  const lines = ['<script>', 'const a = 1', '</script>', '<style>', '.a {}', '</style>', '<style lang="scss">', '$a: 1px;', '</style>'];
+  const lines = ['<script>', 'const a = f(1)', '</script>', '<style>', '.a {}', '</style>', '<style lang="scss">', '$a: 1px;', '</style>'];
   await waitFor(() => {
     const tokens = tokenizeLines(monaco, lines);
-    return tokens[1].some(token => token.type === 'keyword.ts') && tokens[4].some(token => token.type === 'tag.css')
+    return tokens[1].some(token => token.type === 'function.ts') && tokens[4].some(token => token.type === 'tag.css')
       && tokens[7].some(token => token.type.endsWith('.scss'));
   }, 'the embedded grammars');
+}
+
+// The color Monaco renders for each piece of `text`, read from colorize output and the theme's `.mtkN` rules.
+async function renderedColors(monaco, window, text, language) {
+  return coloredPieces(window, await monaco.editor.colorize(text, language, {}));
+}
+
+// Each `mtk` span of Monaco's html with its color from the theme's `.mtkN` rules.
+function coloredPieces(window, html) {
+  const css = [...window.document.querySelectorAll('style.monaco-colors')].map(style => style.textContent).join('\n');
+  const colors = Object.fromEntries([...css.matchAll(/\.mtk(\d+) \{ color: (#[0-9a-f]+); \}/gi)].map(([, id, color]) => [id, color.toLowerCase()]));
+  const container = window.document.createElement('div');
+  container.innerHTML = html;
+  return [...container.querySelectorAll('span[class^="mtk"]')].map(span => ({
+    text: span.textContent,
+    color: colors[span.className.match(/mtk(\d+)/)[1]]
+  }));
 }
 
 module.exports = {
@@ -294,7 +317,10 @@ module.exports = {
   vueLanguageCalls,
   loadRealMonaco,
   waitFor,
+  settle,
   tokenizeLines,
   languagesOf,
-  waitForEmbeddedGrammars
+  waitForEmbeddedGrammars,
+  renderedColors,
+  coloredPieces
 };

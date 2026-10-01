@@ -180,8 +180,38 @@ test('every Prism token type the content script sends is one the bridge accepts'
   page.sendTheme(payload);
 
   assert.ok(Object.keys(payload.vs).length > 10);
-  assert.ok(payload.vs.function, 'the function color is sent, for scss function calls and sql built-ins');
+  assert.ok(payload.vs.function, 'the function color is sent, for calls, scss function calls and sql built-ins');
   assert.equal(page.fake.calls.defineTheme.length, 2);
+});
+
+test('the Prism function color colors the function token of calls in both bases', () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  page.sendTheme({
+    vs: { function: { foreground: '#654321', fontStyle: '' } },
+    'vs-dark': { function: { foreground: '#fedcba', fontStyle: 'italic' } }
+  });
+
+  for (const [themeName, foreground, fontStyle] of [['vs', '654321', ''], ['vs-dark', 'fedcba', 'italic']]) {
+    const theme = page.fake.calls.defineTheme.find(call => call.themeName === themeName);
+    const rule = theme.themeData.rules.find(candidate => candidate.token === 'function');
+    assert.deepEqual({ ...rule }, { token: 'function', foreground, fontStyle }, themeName);
+  }
+});
+
+test('the Prism operator and boolean colors color the operator and boolean tokens in both bases', () => {
+  const page = loadBridge();
+  page.assignMonaco();
+  page.sendTheme({
+    vs: { operator: { foreground: '#111111', fontStyle: '' }, boolean: { foreground: '#222222', fontStyle: '' } },
+    'vs-dark': { operator: { foreground: '#333333', fontStyle: '' }, boolean: { foreground: '#444444', fontStyle: 'italic' } }
+  });
+
+  for (const [themeName, operator, boolean] of [['vs', '111111', ['222222', '']], ['vs-dark', '333333', ['444444', 'italic']]]) {
+    const { rules } = page.fake.calls.defineTheme.find(call => call.themeName === themeName).themeData;
+    assert.deepEqual({ ...rules.find(rule => rule.token === 'operator') }, { token: 'operator', foreground: operator, fontStyle: '' }, themeName);
+    assert.deepEqual({ ...rules.find(rule => rule.token === 'boolean') }, { token: 'boolean', foreground: boolean[0], fontStyle: boolean[1] }, themeName);
+  }
 });
 
 // Every token color rule of Monaco 0.29.1's built-in vs and vs-dark themes, read from the bundle.
@@ -207,8 +237,10 @@ test('the colors the content script sends replace every built-in color rule, apa
   page.assignMonaco();
   page.sendTheme(themeEvents[0]);
 
-  const vs = page.fake.calls.defineTheme.find(call => call.themeName === 'vs');
-  const mapped = new Set(vs.themeData.rules.map(rule => rule.token));
-  const unmapped = [...builtInRuleTokens()].filter(token => !mapped.has(token));
-  assert.deepEqual(unmapped.sort(), [...UNMAPPED_BUILT_IN_RULES].sort());
+  for (const themeName of ['vs', 'vs-dark']) {
+    const theme = page.fake.calls.defineTheme.find(call => call.themeName === themeName);
+    const mapped = new Set(theme.themeData.rules.map(rule => rule.token));
+    const unmapped = [...builtInRuleTokens()].filter(token => !mapped.has(token));
+    assert.deepEqual(unmapped.sort(), [...UNMAPPED_BUILT_IN_RULES].sort(), themeName);
+  }
 });
