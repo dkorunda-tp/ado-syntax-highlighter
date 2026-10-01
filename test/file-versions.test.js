@@ -24,11 +24,14 @@ function addedCard(text) {
 
 const languages = highlightCalls => highlightCalls.map(call => call.language);
 
+// Push 1 has TEXT_1 and push 2 has TEXT_2, with one common commit.
+const twoPushServer = () => createAdoServer({
+  iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
+  files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
+});
+
 test('an added file shown at an older push takes the newest push whose lines match the rows', async () => {
-  const server = createAdoServer({
-    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
-    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
-  });
+  const server = twoPushServer();
   const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
 
   await window.processFileDiff(mount(window, addedCard(TEXT_1)));
@@ -79,10 +82,7 @@ test('the iterations list is fetched again on each pass, so a new push is used',
 });
 
 test('an iteration in the URL is the only version tried', async () => {
-  const server = createAdoServer({
-    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
-    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
-  });
+  const server = twoPushServer();
   const { window } = await loadExtension({ url: `${PR_URL}&iteration=2`, fetch: server.fetch });
 
   await window.processFileDiff(mount(window, addedCard(TEXT_1)));
@@ -108,10 +108,7 @@ test('a base without an iteration fixes the old side and searches the new side',
 });
 
 test('non-breaking spaces and ADO spans in a row still match the version that has its text', async () => {
-  const server = createAdoServer({
-    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
-    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
-  });
+  const server = twoPushServer();
   const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
   const html = '.a&nbsp;{&nbsp;color:&nbsp;<span class="added-content">red</span>;&nbsp;}';
   const card = mount(window, fileCard({ filePath: PATH, diff: inlineRow({ newLine: 5, type: 'added', html }) }));
@@ -156,7 +153,7 @@ test('a version that is missing is skipped for the next one', async () => {
 test('a version request that never finishes times out, and the older version is used', async () => {
   const server = createAdoServer({
     iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
-    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
+    files: { [`src1:${PATH}`]: TEXT_1 }
   });
   const stalled = [];
   const fetch = (url, options) => {
@@ -190,10 +187,7 @@ test('the last five pushes bound the search even when their commits repeat', asy
 });
 
 test('rows that appear while the fetch is in flight take part in the version choice', async () => {
-  const server = createAdoServer({
-    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
-    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
-  });
+  const server = twoPushServer();
   const gated = gatedFetch(server.fetch);
   const { window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
   // Row 1 is the same in both pushes; row 5 shows that the page holds push 1.
