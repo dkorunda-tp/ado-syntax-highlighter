@@ -90,6 +90,39 @@ test('an iteration in the URL is the only version tried', async () => {
   assert.deepEqual(itemCalls(server), ['src2']);
 });
 
+test('a base without an iteration fixes the old side and searches the new side', async () => {
+  const server = createAdoServer({
+    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common'), iteration(3, 'src3', 'common')],
+    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_1, [`src3:${PATH}`]: TEXT_2 }
+  });
+  const { window, highlightCalls } = await loadExtension({ url: `${PR_URL}&base=1`, fetch: server.fetch });
+  const rows = [
+    { oldLine: 5, type: 'removed', code: '.a { color: red; }' },
+    { newLine: 5, type: 'added', code: '.a { color: red; }' }
+  ];
+
+  await window.processFileDiff(mount(window, fileCard({ filePath: PATH, diff: rows.map(inlineRow).join('') })));
+
+  assert.deepEqual(languages(highlightCalls), ['css', 'css']);
+  assert.deepEqual(itemCalls(server).sort(), ['src1', 'src2', 'src3']);
+});
+
+test('non-breaking spaces and ADO spans in a row still match the version that has its text', async () => {
+  const server = createAdoServer({
+    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
+    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
+  });
+  const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
+  const html = '.a&nbsp;{&nbsp;color:&nbsp;<span class="added-content">red</span>;&nbsp;}';
+  const card = mount(window, fileCard({ filePath: PATH, diff: inlineRow({ newLine: 5, type: 'added', html }) }));
+
+  await window.processFileDiff(card);
+
+  assert.deepEqual(itemCalls(server), ['src2', 'src1']);
+  assert.deepEqual(languages(highlightCalls), ['css']);
+  assert.match(card.querySelector('.ado-syntax-highlighted').innerHTML, /class="added-content"/);
+});
+
 test('at most five versions are tried, and with no match the newest fetched version is used', async () => {
   const iterations = [];
   const files = {};

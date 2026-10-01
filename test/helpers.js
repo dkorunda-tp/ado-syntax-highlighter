@@ -135,13 +135,16 @@ function fileCard({ filePath, diff, encoding, renamedFrom }) {
 
 // A comment-thread card on the Overview tab: one number column per row and no splitter panes.
 // Markup taken from PR 9414, PlaybookItemsView.vue.
-function commentCard({ filePath, rows }) {
-  const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-  const row = ({ line, type, code }) => `<div class="repos-diff-contents-row monospaced-text" role="row">` +
+function commentRow({ line, type, code }) {
+  return `<div class="repos-diff-contents-row monospaced-text" role="row">` +
     `<span role="cell" class="padding-horizontal-8 text-right secondary-text"><span class="screen-reader-only">${line} </span>` +
     `<span aria-hidden="true"><span class="repos-line-number" data-line="${line}"></span></span></span>` +
     `<span tabindex="-1" class="padding-right-8 repos-line-content ${type}" role="cell"><span class="screen-reader-only">Plus &nbsp;</span>` +
     `<span aria-hidden="true"><span class="line-icon ${type}"></span></span>${escapeHtml(code)}</span></div>`;
+}
+
+function commentCard({ filePath, rows }) {
+  const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
   return `<div class="flex-row flex-grow no-padding bolt-card flex-column depth-8 bolt-card-white"><div class="bolt-card-content flex-row flex-grow">` +
     `<div class="flex-column flex-grow scroll-hidden"><div class="comment-file-header flex-column">` +
     `<div class="comment-file-header-title flex-row">` +
@@ -150,7 +153,7 @@ function commentCard({ filePath, rows }) {
     `<a class="comment-file-header-link body-m font-weight-semibold text-ellipsis bolt-link" href="/P/_git/R/pullrequest/42?_a=files&amp;path=${filePath}&amp;discussionId=1">${fileName}</a>` +
     `<span class="body-s secondary-text text-ellipsis flex-self-stretch">${filePath}</span></div></div>` +
     `<div class="comment-file-diff-container margin-top-16 flex-row"><div class="repos-summary-code-diff custom-scrollbar">` +
-    `<div class="repos-summary-diff-container body-s"><div>${rows.map(row).join('')}</div></div></div></div>` +
+    `<div class="repos-summary-diff-container body-s"><div>${rows.map(commentRow).join('')}</div></div></div></div>` +
     `</div></div></div></div>`;
 }
 
@@ -239,6 +242,7 @@ module.exports = {
   sideBySide,
   fileCard,
   commentCard,
+  commentRow,
   gatedFetch,
   jsonResponse,
   iteration,

@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadExtension, mount, commentCard, fileCard, inlineRow, iteration, createAdoServer, highlightedClones } = require('./helpers');
+const {
+  loadExtension, mount, commentCard, commentRow, fileCard, inlineRow, iteration, createAdoServer, highlightedClones
+} = require('./helpers');
 
 const OVERVIEW_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=overview';
 const PATH = '/frontend/src/views/admin/playbook-items/PlaybookItemsView.vue';
@@ -45,6 +47,22 @@ test('a .vue thread snippet reads the path from the card and takes the tokens of
   // The attribute line of a multi-line tag only gets an attr-name token from the whole-file tokens.
   assert.match(highlightedClones(card)[1].innerHTML, /token attr-name/);
   assert.ok(ado.calls.some(call => call.url.searchParams.get('path') === PATH && call.url.searchParams.get('versionDescriptor.version') === 'src1'));
+});
+
+test('a .vue thread card with no rows yet makes no request, and its first rows are highlighted on a later pass', async () => {
+  const ado = server();
+  const { window, highlightCalls } = await loadExtension({ url: OVERVIEW_URL, fetch: ado.fetch });
+  const card = mount(window, commentCard({ filePath: PATH, rows: [] }));
+
+  await window.processFileDiff(card);
+  assert.equal(ado.calls.length, 0);
+  assert.equal(highlightCalls.length, 0);
+
+  card.querySelector('.repos-summary-diff-container > div').insertAdjacentHTML('beforeend', rowsFor(3, 3).map(commentRow).join(''));
+  await window.processFileDiff(card);
+
+  assert.deepEqual(highlightCalls.map(call => call.language), ['vue-template']);
+  assert.match(highlightedClones(card)[0].innerHTML, /token attr-name/);
 });
 
 test('a pass highlights the Overview thread cards and the Files tab cards', async () => {
