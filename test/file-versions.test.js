@@ -153,6 +153,29 @@ test('a version that is missing is skipped for the next one', async () => {
   assert.equal(languages(highlightCalls)[4], 'css');
 });
 
+test('a version request that never finishes times out, and the older version is used', async () => {
+  const server = createAdoServer({
+    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
+    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
+  });
+  const stalled = [];
+  const fetch = (url, options) => {
+    if (!new URL(url).searchParams.get('versionDescriptor.version')?.startsWith('src2')) return server.fetch(url, options);
+    stalled.push(options.signal);
+    return new Promise((resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+  };
+  const { window, highlightCalls } = await loadExtension({ fetch });
+  // Run the request timeout at once instead of after its full delay.
+  const setTimeoutOf = window.setTimeout;
+  window.setTimeout = (callback, delay, ...args) => setTimeoutOf(callback, delay >= 10000 ? 0 : delay, ...args);
+
+  await window.processFileDiff(mount(window, addedCard(TEXT_1)));
+
+  assert.equal(stalled.length, 1);
+  assert.equal(stalled[0]?.aborted, true);
+  assert.equal(languages(highlightCalls)[4], 'css');
+});
+
 test('the last five pushes bound the search even when their commits repeat', async () => {
   // Pushes 2 to 6 share one common commit; push 1 is the sixth newest, so its common commit is never tried.
   const iterations = [iteration(1, 'src1', 'commonB')];

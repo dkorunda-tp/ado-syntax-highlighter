@@ -329,19 +329,26 @@ function chooseDiffCommits(iterations, iterationId, baseId) {
   return newCommit && oldCommit ? { old: oldCommit, new: newCommit } : null;
 }
 
+// A request that has not finished, body included, after this time is aborted, so a stalled version cannot block
+// the older versions or keep its card in flight.
+const ADO_REQUEST_TIMEOUT_MS = 15000;
+
 // Same-origin fetch, so the page session cookies go with it. A failed request is removed from the cache, so a later call retries it.
 function fetchFromAdo(url, accept, read) {
   if (!adoRequests.has(url)) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ADO_REQUEST_TIMEOUT_MS);
     const request = fetch(url, {
       credentials: 'same-origin',
-      headers: { Accept: accept, 'X-TFS-FedAuthRedirect': 'Suppress' }
+      headers: { Accept: accept, 'X-TFS-FedAuthRedirect': 'Suppress' },
+      signal: controller.signal
     }).then(response => {
       const contentType = response.headers.get('content-type') || '';
       if (response.status !== 200 || contentType.includes('text/html')) {
         throw new Error(`HTTP ${response.status} for ${url}`);
       }
       return read(response);
-    });
+    }).finally(() => clearTimeout(timeout));
     request.catch(() => {
       if (adoRequests.get(url) === request) adoRequests.delete(url);
     });
