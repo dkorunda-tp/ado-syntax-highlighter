@@ -82,7 +82,7 @@ Block tag lines and lines outside a block are highlighted as HTML. Tags, comment
 
 Inside `<template>`, Vue expressions are highlighted as TypeScript: the content of `{{ }}` interpolations, and the values of directives (`v-if`, `v-for`, `v-model` and other `v-` attributes, `:prop`, `@event` and `#slot`). Plain attribute values stay strings. This applies in both views.
 
-To find the block of each line, the extension reads the full file text of both sides of the diff from the Azure DevOps REST API. It uses your current browser session and sends no other credentials. It honors the iteration and base that you select in the pull request. With no iteration selected, it uses the newest of the last five pushes whose file text matches the lines on screen. If a request fails or takes longer than 15 seconds, the lines of that side of the diff show as plain text. Commit and branch compare pages show `.vue` files as plain text.
+To find the block of each line, the extension reads the full file text of each side of the diff that shows lines, from the Azure DevOps REST API. It uses your current browser session and sends no other credentials. It honors the iteration and base that you select in the pull request. With no iteration selected, it tries the last five pushes, newest first, and uses the first file text that matches the lines on screen. A request that fails or takes longer than 15 seconds is skipped for the next push. When no text matches, it uses the newest text it read. When it reads no text for a side, the lines of that side show as plain text. Commit and branch compare pages show `.vue` files as plain text.
 
 ### Single-File View
 

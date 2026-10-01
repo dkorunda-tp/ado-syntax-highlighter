@@ -49,7 +49,7 @@ test('an added file fetches no old side', async () => {
 test('the old side tries the common commits newest first until one matches', async () => {
   const server = createAdoServer({
     iterations: [iteration(1, 'src1', 'common1'), iteration(2, 'src2', 'common2')],
-    files: { [`common1:${PATH}`]: TEXT_1, [`common2:${PATH}`]: TEXT_2, [`src2:${PATH}`]: TEXT_2 }
+    files: { [`common1:${PATH}`]: TEXT_1, [`common2:${PATH}`]: TEXT_2 }
   });
   const { window, highlightCalls } = await loadExtension({ fetch: server.fetch });
   const removed = { oldLine: 5, type: 'removed', code: '.a { color: red; }' };
@@ -210,7 +210,7 @@ test('rows that appear while the fetch is in flight take part in the version cho
 
 const THREAD_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=overview';
 // The old file has the style block two lines earlier than the new one.
-const OLD_FILE = ['<template>', '  <div />', '</template>', '<style>', '.a { color: red; }', '</style>'].join('\n');
+const OLD_FILE = TEXT_1;
 const NEW_FILE = ['<template>', '  <div />', '  <p />', '  <p />', '</template>', '<style>', '.a { color: red; }', '</style>'].join('\n');
 
 function threadServer() {

@@ -377,12 +377,12 @@ function forgetIterationsLists() {
 // The page can show an older push than the newest one, for example after a push while the page is open, or in
 // an Overview comment thread. So with no iteration in the URL, a side tries the commits of the iterations
 // newest first. An iteration or a base in the URL fixes that side to one commit.
-const MAX_FILE_VERSIONS = 5;
+const MAX_RECENT_PUSHES = 5;
 
 function chooseCommitCandidates(iterations, iterationId, baseId) {
   const commits = chooseDiffCommits(iterations, iterationId, baseId);
   if (!commits) return null;
-  const newestFirst = iterationId ? [] : [...iterations].sort((a, b) => b.id - a.id).slice(0, MAX_FILE_VERSIONS);
+  const newestFirst = iterationId ? [] : [...iterations].sort((a, b) => b.id - a.id).slice(0, MAX_RECENT_PUSHES);
   const candidates = (first, others) => [...new Set([first, ...others].filter(Boolean))];
   return {
     new: candidates(commits.new, newestFirst.map(item => item.sourceRefCommit?.commitId)),
@@ -560,12 +560,14 @@ function processFileDiff(fileDiffElement) {
 const LINE_SELECTOR = '.monospaced-text > .repos-line-content';
 const NON_CODE_QUERY = '.screen-reader-only, span[aria-hidden="true"]';
 
-// The code of a row as Prism reads it, without the screen reader text and the line icon.
-function getLineCode(lineElement) {
+// A copy of a row with only its code, without the screen reader text and the line icon.
+function cloneLineCode(lineElement) {
   const codeContainer = lineElement.cloneNode(true);
   codeContainer.querySelectorAll(NON_CODE_QUERY).forEach(el => el.remove());
-  return codeContainer.textContent;
+  return codeContainer;
 }
+
+const getLineCode = lineElement => cloneLineCode(lineElement).textContent;
 
 function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => null) {
   let originalLineElements = fileDiffElement.querySelectorAll(LINE_SELECTOR);
@@ -579,9 +581,7 @@ function highlightLines(fileDiffElement, getLineLanguage, getFileLine = () => nu
         elementsToPreserve.push(el.cloneNode(true));
       });
 
-      const codeContainer = originalLineElement.cloneNode(true);
-      codeContainer.querySelectorAll(NON_CODE_QUERY).forEach(el => el.remove());
-      const codeToHighlight = codeContainer.innerHTML;
+      const codeToHighlight = cloneLineCode(originalLineElement).innerHTML;
 
       const highlightedLine = originalLineElement.cloneNode(true);
 
