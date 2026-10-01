@@ -375,8 +375,8 @@ const MAX_FILE_VERSIONS = 5;
 function chooseCommitCandidates(iterations, iterationId, baseId) {
   const commits = chooseDiffCommits(iterations, iterationId, baseId);
   if (!commits) return null;
-  const newestFirst = iterationId ? [] : [...iterations].sort((a, b) => b.id - a.id);
-  const candidates = (first, others) => [...new Set([first, ...others].filter(Boolean))].slice(0, MAX_FILE_VERSIONS);
+  const newestFirst = iterationId ? [] : [...iterations].sort((a, b) => b.id - a.id).slice(0, MAX_FILE_VERSIONS);
+  const candidates = (first, others) => [...new Set([first, ...others].filter(Boolean))];
   return {
     new: candidates(commits.new, newestFirst.map(item => item.sourceRefCommit?.commitId)),
     old: candidates(commits.old, baseId ? [] : newestFirst.map(item => item.commonRefCommit?.commitId))
@@ -390,7 +390,9 @@ const rowsMatchFileLines = (rows, fileLines) => rows.every(row => {
 
 // `rows` holds the visible rows of each side. A side with no rows is not fetched, so an added file fetches no
 // old side. A side takes the first version that has the text of every row, or else the first version found.
-async function loadVueFileLines(context, filePaths, rows) {
+// With `eitherSide`, the rows in `rows.new` may belong to either side: the new side is tried first, then the old
+// side, and `side` in the result names the side that is used.
+async function loadVueFileLines(context, filePaths, rows, eitherSide = false) {
   keepAdoRequestsFor(context);
   const iterations = await fetchFromAdo(
     `${context.apiBase}/pullRequests/${context.pullRequestId}/iterations?api-version=7.1`,
@@ -406,22 +408,28 @@ async function loadVueFileLines(context, filePaths, rows) {
     'text/plain',
     response => response.text()
   ).then(parseVueFileLines).catch(() => null);
-  const loadMatchingSide = async side => {
-    if (!rows[side].length) return null;
+  const loadMatchingSide = async (side, sideRows) => {
+    if (!sideRows.length) return { lines: null, matched: false };
     let firstFound = null;
     for (const commit of commits[side]) {
       const fileLines = await loadSide(commit, filePaths[side]);
       if (!fileLines) continue;
-      if (rowsMatchFileLines(rows[side], fileLines)) return fileLines;
+      if (rowsMatchFileLines(sideRows, fileLines)) return { lines: fileLines, matched: true };
       firstFound ??= fileLines;
     }
-    return firstFound;
+    return { lines: firstFound, matched: false };
   };
-  const [oldLines, newLines] = await Promise.all([loadMatchingSide('old'), loadMatchingSide('new')]);
-  return { old: oldLines, new: newLines };
+  if (eitherSide) {
+    const asNew = await loadMatchingSide('new', rows.new);
+    const asOld = asNew.matched ? null : await loadMatchingSide('old', rows.new);
+    return asOld?.matched ? { old: asOld.lines, new: null, side: 'old' } : { old: null, new: asNew.lines, side: 'new' };
+  }
+  const [oldSide, newSide] = await Promise.all([loadMatchingSide('old', rows.old), loadMatchingSide('new', rows.new)]);
+  return { old: oldSide.lines, new: newSide.lines };
 }
 
-function getDiffLineLocation(lineElement, fileDiffElement) {
+// `oneFileSide` is the side of every row of a card that shows one file, from getOneFileSide.
+function getDiffLineLocation(lineElement, fileDiffElement, oneFileSide = null) {
   const row = lineElement.closest('.repos-diff-contents-row');
   if (!row) return null;
   const numberElements = row.querySelectorAll('.repos-line-number');
@@ -432,7 +440,7 @@ function getDiffLineLocation(lineElement, fileDiffElement) {
     side = pane.classList.contains('vss-Splitter--pane-fixed') ? 'old' : 'new';
     numberElement = numberElements[0];
   } else {
-    side = lineElement.classList.contains('removed') ? 'old' : 'new';
+    side = oneFileSide || (lineElement.classList.contains('removed') ? 'old' : 'new');
     // An added or deleted file has one number column. Otherwise the first column is old and the second is new.
     numberElement = numberElements.length === 1 ? numberElements[0] : numberElements[side === 'old' ? 0 : 1];
   }
@@ -459,22 +467,46 @@ function getFilePaths(fileDiffElement) {
   return { old: findPath('.body-s.secondary-text.flex-column .text-ellipsis') || newPath, new: newPath };
 }
 
-async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
-  const filePaths = getFilePaths(fileDiffElement);
+// An added or deleted file and an Overview thread snippet show one file: no splitter panes and one number column
+// on every row. All rows of such a card are on one side: new with an added row, old with a removed row, and
+// 'either' when every row is unchanged. A card with both kinds of rows, or another card, gives null, and each
+// row then takes the side of its own class.
+function getOneFileSide(fileDiffElement) {
+  if (fileDiffElement.querySelector('.vss-Splitter--pane-fixed, .vss-Splitter--pane-flexible')) return null;
+  const rows = [...fileDiffElement.querySelectorAll('.repos-diff-contents-row')];
+  if (!rows.length || rows.some(row => row.querySelectorAll('.repos-line-number').length !== 1)) return null;
+  const lines = [...fileDiffElement.querySelectorAll(LINE_SELECTOR)];
+  const added = lines.some(line => line.classList.contains('added'));
+  const removed = lines.some(line => line.classList.contains('removed'));
+  if (added && removed) return null;
+  return added ? 'new' : removed ? 'old' : 'either';
+}
+
+// The visible rows of each side. The rows of an 'either' card are held as new rows.
+function getSideRows(fileDiffElement, oneFileSide) {
+  const rowSide = oneFileSide === 'either' ? 'new' : oneFileSide;
   const rows = { old: [], new: [] };
   fileDiffElement.querySelectorAll(LINE_SELECTOR).forEach(lineElement => {
-    const location = getDiffLineLocation(lineElement, fileDiffElement);
+    const location = getDiffLineLocation(lineElement, fileDiffElement, rowSide);
     if (location) rows[location.side].push({ lineNumber: location.lineNumber, code: getLineCode(lineElement) });
   });
+  return rows;
+}
+
+async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
+  const filePaths = getFilePaths(fileDiffElement);
+  const oneFileSide = getOneFileSide(fileDiffElement);
+  const rows = getSideRows(fileDiffElement, oneFileSide);
   if (!rows.old.length && !rows.new.length) {
     // The rows of an Overview thread render after its card, and a later pass processes the card again.
     return highlightLines(fileDiffElement, () => fileLanguage);
   }
+  const rowsSnapshot = JSON.stringify(rows);
   let fileLines = { old: null, new: null };
   vueFilesInFlight.add(fileDiffElement);
   try {
     if (filePaths) {
-      fileLines = await loadVueFileLines(context, filePaths, rows);
+      fileLines = await loadVueFileLines(context, filePaths, rows, oneFileSide === 'either');
     }
   } catch (error) {
     console.debug('ADO Syntax Highlighter: Vue blocks unavailable, using the file language:', error);
@@ -484,12 +516,15 @@ async function processVueFileDiff(fileDiffElement, fileLanguage, context) {
   if (!fileDiffElement.isConnected) {
     return;
   }
-  if (getPullRequestContext(window.location)?.key !== context.key || getFilePaths(fileDiffElement)?.new !== filePaths?.new) {
-    // The URL or the file shown in this card changed during the fetch, and a pass skipped the card while it was in flight.
+  if (getPullRequestContext(window.location)?.key !== context.key || getFilePaths(fileDiffElement)?.new !== filePaths?.new ||
+    JSON.stringify(getSideRows(fileDiffElement, getOneFileSide(fileDiffElement))) !== rowsSnapshot) {
+    // The URL, the file shown in this card or its rows changed during the fetch, and a pass skipped the card while
+    // it was in flight. The fetched versions stay cached, so the second choice costs few requests.
     return processFileDiff(fileDiffElement);
   }
+  const lineSide = fileLines.side || (oneFileSide === 'either' ? 'new' : oneFileSide);
   const getFileLine = lineElement => {
-    const location = getDiffLineLocation(lineElement, fileDiffElement);
+    const location = getDiffLineLocation(lineElement, fileDiffElement, lineSide);
     return (location && fileLines[location.side]?.[location.lineNumber - 1]) || null;
   };
   highlightLines(fileDiffElement, lineElement => getFileLine(lineElement)?.language || fileLanguage, getFileLine);

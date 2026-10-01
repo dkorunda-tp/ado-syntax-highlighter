@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { PR_URL, loadExtension, mount, fileCard, inlineRow, singleColumnRow, iteration, createAdoServer } = require('./helpers');
+const {
+  PR_URL, loadExtension, mount, fileCard, commentCard, inlineRow, singleColumnRow, gatedFetch, iteration, createAdoServer
+} = require('./helpers');
 
 const PATH = '/frontend/src/components/playbook/PlaybookItemEditor.vue';
 // Push 2 adds a blank line 2, so every later line moves down one; the style line shows which version a row used.
@@ -116,4 +118,77 @@ test('a version that is missing is skipped for the next one', async () => {
 
   assert.deepEqual(itemCalls(server), ['src2', 'src1']);
   assert.equal(languages(highlightCalls)[4], 'css');
+});
+
+test('the last five pushes bound the search even when their commits repeat', async () => {
+  // Pushes 2 to 6 share one common commit; push 1 is the sixth newest, so its common commit is never tried.
+  const iterations = [iteration(1, 'src1', 'commonB')];
+  for (let id = 2; id <= 6; id++) iterations.push(iteration(id, `src${id}`, 'commonA'));
+  const server = createAdoServer({ iterations, files: { [`commonA:${PATH}`]: TEXT_2, [`commonB:${PATH}`]: TEXT_1 } });
+  const { window } = await loadExtension({ fetch: server.fetch });
+  const removed = { oldLine: 5, type: 'removed', code: '.a { color: red; }' };
+
+  await window.processFileDiff(mount(window, fileCard({ filePath: PATH, diff: inlineRow(removed) })));
+
+  assert.deepEqual(itemCalls(server), ['commonA']);
+});
+
+test('rows that appear while the fetch is in flight take part in the version choice', async () => {
+  const server = createAdoServer({
+    iterations: [iteration(1, 'src1', 'common'), iteration(2, 'src2', 'common')],
+    files: { [`src1:${PATH}`]: TEXT_1, [`src2:${PATH}`]: TEXT_2 }
+  });
+  const gated = gatedFetch(server.fetch);
+  const { window, highlightCalls } = await loadExtension({ fetch: gated.fetch });
+  // Row 1 is the same in both pushes; row 5 shows that the page holds push 1.
+  const card = mount(window, fileCard({ filePath: PATH, diff: singleColumnRow({ line: 1, type: 'added', code: '<template>' }) }));
+
+  const pending = window.processFileDiff(card);
+  card.querySelector('.repos-summary-code-diff')
+    .insertAdjacentHTML('beforeend', singleColumnRow({ line: 5, type: 'added', code: '.a { color: red; }' }));
+  gated.open();
+  await pending;
+
+  assert.deepEqual(languages(highlightCalls), ['vue-template', 'css']);
+});
+
+const THREAD_URL = 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/42?_a=overview';
+// The old file has the style block two lines earlier than the new one.
+const OLD_FILE = ['<template>', '  <div />', '</template>', '<style>', '.a { color: red; }', '</style>'].join('\n');
+const NEW_FILE = ['<template>', '  <div />', '  <p />', '  <p />', '</template>', '<style>', '.a { color: red; }', '</style>'].join('\n');
+
+function threadServer() {
+  return createAdoServer({
+    iterations: [iteration(1, 'src1', 'common1')],
+    files: { [`common1:${PATH}`]: OLD_FILE, [`src1:${PATH}`]: NEW_FILE }
+  });
+}
+
+test('a thread on the left side of an edited file reads its unchanged rows from the old file', async () => {
+  const server = threadServer();
+  const { window, highlightCalls } = await loadExtension({ url: THREAD_URL, fetch: server.fetch });
+  const rows = [
+    { line: 4, type: 'unchanged', code: '<style>' },
+    { line: 5, type: 'removed', code: '.a { color: red; }' }
+  ];
+
+  await window.processFileDiff(mount(window, commentCard({ filePath: PATH, rows })));
+
+  assert.deepEqual(languages(highlightCalls), ['markup', 'css']);
+  assert.deepEqual(itemCalls(server), ['common1']);
+});
+
+test('a thread with unchanged rows only takes the new file when they match it, else the old file', async () => {
+  const languagesFor = async rows => {
+    const server = threadServer();
+    const { window, highlightCalls } = await loadExtension({ url: THREAD_URL, fetch: server.fetch });
+    await window.processFileDiff(mount(window, commentCard({ filePath: PATH, rows })));
+    return { languages: languages(highlightCalls), items: itemCalls(server) };
+  };
+
+  // Line 7 of the new file and line 5 of the old file are the same CSS line.
+  assert.deepEqual(await languagesFor([{ line: 7, type: 'unchanged', code: '.a { color: red; }' }]),
+    { languages: ['css'], items: ['src1'] });
+  assert.deepEqual(await languagesFor([{ line: 5, type: 'unchanged', code: '.a { color: red; }' }]),
+    { languages: ['css'], items: ['src1', 'common1'] });
 });
